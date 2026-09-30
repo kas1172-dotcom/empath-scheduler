@@ -1,0 +1,2062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EMPATH Unit Scheduler — Demo</title>
+<style>
+  :root{
+    --bg:#FDFCFE; --panel:#FFFFFF; --ink:#2A2438; --ink-soft:#6B6178;
+    --border:#E6DFF2; --border-soft:#F3EFFA;
+    --purple:#8C6FC9; --purple-soft:#EFE8FA;
+    --gold:#B8892B; --gold-soft:#FAF1DC;
+    --rust:#B5502E; --rust-soft:#F7E7E1;
+    --green:#3C7A4E; --green-soft:#E4F0E7;
+    --amber:#B8892B; --amber-soft:#FAF1DC;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  :root:not([data-theme="light"]){
+    @media (prefers-color-scheme: dark){
+      --bg:#1B1723; --panel:#241F2E; --ink:#EDE9F5; --ink-soft:#A79BB8;
+      --border:#3A3248; --border-soft:#2D2638;
+      --purple-soft:#382C50; --gold-soft:#3A2E14; --rust-soft:#3A2119; --green-soft:#1D3324; --amber-soft:#3A2E14;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#1B1723; --panel:#241F2E; --ink:#EDE9F5; --ink-soft:#A79BB8;
+    --border:#3A3248; --border-soft:#2D2638;
+    --purple-soft:#382C50; --gold-soft:#3A2E14; --rust-soft:#3A2119; --green-soft:#1D3324; --amber-soft:#3A2E14;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  header{ padding:16px 24px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+  header h1{ font-size:19px; margin:0; letter-spacing:-0.01em; }
+  header .sub{ color:var(--ink-soft); font-size:12.5px; margin-top:3px; }
+  .stats{ display:flex; gap:18px; flex-wrap:wrap; }
+  .stat{ text-align:right; }
+  .stat .n{ font-family:var(--mono); font-size:18px; font-weight:600; }
+  .stat .l{ color:var(--ink-soft); font-size:11px; }
+  .stat.warn .n{ color:var(--rust); }
+  .stat.ok .n{ color:var(--green); }
+
+  nav{ display:flex; gap:2px; padding:0 24px; border-bottom:1px solid var(--border); overflow-x:auto; }
+  nav button{ background:none; border:none; padding:12px 14px; font:inherit; color:var(--ink-soft); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; }
+  nav button.active{ color:var(--ink); border-bottom-color:var(--purple); font-weight:600; }
+
+  main{ padding:20px 24px 60px; max-width:1180px; margin:0 auto; }
+  .panel{ background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:18px; margin-bottom:18px; }
+  .panel h2{ font-size:14px; margin:0 0 4px; }
+  .panel .desc{ color:var(--ink-soft); font-size:12.5px; margin:0 0 14px; max-width:72ch; }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  label{ font-size:12px; color:var(--ink-soft); display:block; margin-bottom:3px; }
+  select, input[type=number], input[type=text], input[type=date], input[type=time]{
+    font:inherit; font-family:var(--sans); padding:6px 8px; border:1px solid var(--border);
+    border-radius:4px; background:var(--panel); color:var(--ink); min-width:0;
+  }
+  button.btn{ font:inherit; padding:7px 13px; border-radius:4px; border:1px solid var(--purple); background:var(--purple); color:#fff; cursor:pointer; font-weight:600; font-size:12.5px; }
+  button.btn.secondary{ background:transparent; color:var(--purple); }
+  button.btn.danger{ background:var(--rust); border-color:var(--rust); color:#fff; }
+  button.btn:hover{ filter:brightness(1.06); }
+  button.icon-btn{ background:none; border:none; cursor:pointer; color:var(--ink-soft); font-size:13px; padding:2px 5px; }
+  button.icon-btn:hover{ color:var(--rust); }
+
+  .cov-day{ display:grid; grid-template-columns:74px 1fr; gap:10px; align-items:center; padding:5px 0; }
+  .cov-day .lbl{ font-size:12px; color:var(--ink-soft); }
+  .cov-ticks{ display:grid; grid-template-columns:repeat(24,1fr); gap:1.5px; }
+  .tick{ height:22px; border-radius:2px; background:var(--border-soft); position:relative; cursor:pointer; }
+  .tick.ok{ background:var(--green); opacity:.55; }
+  .tick.short{ background:var(--rust); }
+  .tick.floor-fail{ background:var(--rust); box-shadow:0 0 0 1.5px var(--rust) inset; }
+  .tick:hover{ outline:2px solid var(--ink); outline-offset:1px; }
+  .tick.selected{ box-shadow:0 0 0 2px var(--purple) inset, 0 0 0 1px var(--purple); }
+  .tick.shift-edge{ border-left:2px solid var(--ink); }
+  .tick:hover::after{
+    content: attr(data-tip); position:absolute; bottom:26px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:var(--bg); font-size:11px; padding:4px 7px; border-radius:4px;
+    white-space:nowrap; z-index:5; font-family:var(--sans); pointer-events:none;
+  }
+  .hour-axis{ display:grid; grid-template-columns:74px 1fr; gap:10px; margin-top:2px; }
+  .hour-axis .ha{ display:grid; grid-template-columns:repeat(24,1fr); font-size:9px; color:var(--ink-soft); font-family:var(--mono); }
+  .legend{ display:flex; gap:14px; margin-top:12px; font-size:11.5px; color:var(--ink-soft); flex-wrap:wrap; }
+  .legend span{ display:inline-flex; align-items:center; gap:5px; }
+  .swatch{ width:10px; height:10px; border-radius:2px; display:inline-block; }
+  @media (max-width: 640px){
+    select, input[type=number], input[type=text], input[type=date], input[type=time]{ font-size:16px; }
+    .cov-ticks{ gap:1px; }
+    .tick{ height:26px; }
+    main{ padding:14px 10px 60px; }
+    .panel{ padding:12px; }
+    .cal-grid{ gap:2px; }
+    .cal-cell{ min-height:40px; padding:3px 2px; font-size:9.5px; overflow:hidden; }
+    .cal-daynum{ font-size:10px; }
+    .cal-detail{ display:none; }
+    .cal-dots{ display:flex; }
+  }
+  @media print {
+    header, nav, .no-print { display:none !important; }
+    body{ background:#fff; color:#000; }
+    main{ padding:0; max-width:none; }
+    #printArea{ border:none !important; box-shadow:none !important; background:#fff !important; padding:0 !important; margin:0 !important; }
+  }
+
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  th{ text-align:left; color:var(--ink-soft); font-weight:600; font-size:11px; padding:6px 8px; border-bottom:1px solid var(--border); }
+  td{ padding:6px 8px; border-bottom:1px solid var(--border-soft); vertical-align:top; }
+  tr:hover td{ background:var(--border-soft); }
+  .pill{ display:inline-block; padding:2px 7px; border-radius:20px; font-size:11px; font-weight:600; }
+  .pill.mgr{ background:var(--gold-soft); color:var(--gold); }
+  .pill.rn{ background:var(--purple-soft); color:var(--purple); }
+  .pill.aide{ background:var(--gold-soft); color:var(--gold); }
+  .pill.pt{ background:var(--amber-soft); color:var(--amber); }
+  .pill.cert{ background:var(--green-soft); color:var(--green); }
+  .pill.nocert{ background:var(--border-soft); color:var(--ink-soft); }
+  .pill.pending{ background:var(--amber-soft); color:var(--amber); }
+  .pill.approved{ background:var(--green-soft); color:var(--green); }
+  .pill.denied{ background:var(--rust-soft); color:var(--rust); }
+
+  .chip{ display:inline-flex; align-items:center; gap:6px; background:var(--purple-soft); color:var(--purple); border-radius:4px; padding:3px 7px; font-family:var(--mono); font-size:11.5px; margin:2px 3px 2px 0; }
+  .chip.night{ background:var(--gold-soft); color:var(--gold); }
+  .chip button{ background:none;border:none;cursor:pointer;color:inherit;font-size:12px;padding:0;line-height:1; }
+
+  .daycell{ min-width:118px; }
+  .add-shift{ font-size:11px; color:var(--ink-soft); background:none; border:1px dashed var(--border); border-radius:4px; padding:3px 6px; cursor:pointer; margin-top:2px; }
+  .add-shift:hover{ color:var(--purple); border-color:var(--purple); }
+
+  .inline-form{ display:flex; gap:6px; flex-wrap:wrap; align-items:end; margin-top:8px; padding:10px; background:var(--border-soft); border-radius:5px; }
+  .flag{ font-size:11px; padding:5px 8px; border-radius:4px; margin-right:4px; }
+  .flag.warn{ background:var(--amber-soft); color:var(--amber); }
+  .flag.bad{ background:var(--rust-soft); color:var(--rust); }
+  .flag.ok{ background:var(--green-soft); color:var(--green); }
+  .flag.block{ display:block; margin-bottom:10px; }
+
+  .empty{ color:var(--ink-soft); font-size:12.5px; padding:14px; text-align:center; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .cal-head{ font-size:11px; color:var(--ink-soft); text-align:center; padding:2px; font-weight:600; }
+  .cal-cell{ border:1px solid var(--border); border-radius:4px; min-height:58px; padding:4px; font-size:10.5px; }
+  .cal-cell.empty-cell{ border:none; }
+  .cal-cell.selectable{ cursor:pointer; }
+  .cal-cell.selectable:hover{ border-color:var(--purple); }
+  .cal-cell.past{ background:var(--border-soft); }
+  .cal-cell.today{ outline:2px solid var(--purple); outline-offset:-2px; }
+  .cal-cell.sel{ background:var(--purple-soft); box-shadow:0 0 0 2px var(--purple) inset; }
+  .cal-shift.done{ background:var(--border); color:var(--ink-soft); }
+  .cal-tag{ display:inline-block; border-radius:3px; padding:0 3px; margin:2px 2px 0 0; font-size:9px; font-weight:700; font-family:var(--mono); }
+  .cal-tag.pending{ background:var(--amber-soft); color:var(--amber); }
+  .cal-tag.approved{ background:var(--green-soft); color:var(--green); }
+  .cal-tag.denied{ background:var(--rust-soft); color:var(--rust); }
+  .cal-tag.due{ background:var(--gold-soft); color:var(--gold); outline:1px dashed var(--gold); }
+  .badge{ display:inline-block; min-width:16px; padding:0 5px; margin-left:6px; border-radius:9px; background:var(--rust); color:#fff; font-size:10.5px; line-height:16px; text-align:center; }
+  .cal-daynum{ color:var(--ink-soft); font-family:var(--mono); font-size:10px; }
+  .cal-shift{ background:var(--purple-soft); color:var(--purple); border-radius:3px; padding:1px 3px; margin-top:2px; font-family:var(--mono); font-size:9.5px; }
+  .cal-dots{ display:none; gap:3px; margin-top:4px; justify-content:center; flex-wrap:wrap; }
+  .dot{ width:6px; height:6px; border-radius:50%; display:inline-block; }
+  .dot-shift{ background:var(--purple); }
+  .dot-pending{ background:var(--amber); }
+  .dot-approved{ background:var(--green); }
+  .dot-denied{ background:var(--rust); }
+  .dot-due{ background:var(--gold); box-shadow:0 0 0 1px var(--gold); }
+  .rank-list{ padding-left:18px; }
+  .rank-list li{ margin-bottom:6px; }
+  .foot-note{ font-size:11px; color:var(--ink-soft); margin-top:16px; border-top:1px solid var(--border); padding-top:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>EMPATH Unit Scheduler</h1>
+    <div class="sub">12-capacity crisis stabilization unit, ED extension. Saves automatically.</div>
+    <div id="modeToggle" style="margin-top:8px"></div>
+  </div>
+  <div id="undoControl"></div>
+  <div id="syncStatus"></div>
+  <div class="stats" id="statsBar"></div>
+</header>
+
+<nav id="tabs"></nav>
+<main id="main"></main>
+
+<script>
+/* ============ STATE ============ */
+const WEEK_START = "2026-09-14"; // default starting week
+function weekDays(start){ return Array.from({length:7}, (_,i)=>addDays(start,i)); }
+let DAYS = weekDays(WEEK_START);
+const DAY_NAMES = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+function isoLocal(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function addDays(iso,n){ const d = new Date(iso+"T00:00:00"); d.setDate(d.getDate()+n); return isoLocal(d); }
+function todayISO(){ return isoLocal(new Date()); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function fmtHour(h){ h=((h%24)+24)%24; const ampm = h<12?"a":"p"; let hr=h%12; if(hr===0) hr=12; return hr+ampm; }
+function reqLabel(r){
+  if(r.type==="Desired shift" && r.start!=null) return `Desired shift ${fmtHour(r.start)}–${fmtHour((r.start+r.duration)%24)}`;
+  return r.type;
+}
+function statusClass(s){ return s==="rejected" ? "denied" : s; }
+
+let state = {
+  mode:"manager",
+  employeeId:null,
+  employeeView:"month",
+  employeeMonth:null,        // 'YYYY-MM' shown in the employee calendar; null = month of the week open in Coverage
+  empSel:{start:null,end:null,picking:false},
+  empReqType:"PTO",
+  censusSubmissions:[],      // {id,nurseId,date,day,night,note,status:'pending'|'approved'|'rejected'}
+  censusPrompt:"Patients on the unit during your shift (use the same measure every time, e.g. the count at handoff)",
+  weekStart: WEEK_START,
+  otThreshold: 40,
+  holidays: ["2026-11-26","2026-11-27","2026-12-25","2027-01-01"],
+  requirement: { day:2, night:1, floor:1, aideFloor:1 },
+  ratioTarget: 5,
+  censusViewMode: "week",
+  budget: { rnWage:48, mgrWage:58, diffPct:10, holidayDiffPct:50, weeklyTarget:14000 },
+  printOpts: { format:"grid", orientation:"portrait", includeRole:true, includeOT:true, includeHoliday:true, note:"" },
+  census: {
+    [DAYS[0]]:{day:7,night:4}, [DAYS[1]]:{day:6,night:3}, [DAYS[2]]:{day:8,night:4},
+    [DAYS[3]]:{day:7,night:5}, [DAYS[4]]:{day:9,night:5}, [DAYS[5]]:{day:10,night:6}, [DAYS[6]]:{day:8,night:5},
+  },
+  manualFTE: {}, // dateISO -> a real historical FTE figure imported from a spreadsheet, overrides the computed one
+  syncedWeeks: [], // week-start ISO dates already folded into equity YTD, guards against double-counting
+  nurses: [
+    {id:"n1", name:"Laurie Swift",     role:"Manager", fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n2", name:"Anthony Trocano",  role:"Manager", fte:1.0, cert:true,  pref:19, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n3", name:"Christine Davis",  role:"RN",      fte:1.0, cert:true,  pref:9,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n4", name:"Kimberly Fritz",   role:"RN",      fte:1.0, cert:true,  pref:12, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n5", name:"Mary Ronca",       role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n6", name:"Dawn Erickson",    role:"RN",      fte:1.0, cert:false, pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n7", name:"Edward Earvin",    role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n8", name:"Arnetta Sciulli",  role:"RN",      fte:0.5, cert:false, pref:21, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n9", name:"Dyan Conaway",     role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n10",name:"Christina Stevens",role:"RN",      fte:1.0, cert:true,  pref:21, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n11",name:"Faith Ndiga",      role:"RN",      fte:0.5, cert:false, pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p1", name:"Hemant Thapa", role:"Aide", fte:1.0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p2", name:"Kapil Sharma", role:"Aide", fte:0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p3", name:"General Sitter (pool, fills gaps)", role:"Aide", fte:0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+  ],
+  assignments: [],
+  requests: [
+    {id:"r1", nurseId:"n4", date: DAYS[5], type:"PTO", status:"pending"},
+    {id:"r2", nurseId:"n8", date: DAYS[2], type:"Desired shift", start:7, duration:12, status:"pending"},
+    {id:"r3", nurseId:"n6", date: DAYS[6], type:"PTO", status:"approved"},
+  ],
+};
+(function seedSchedule(){
+  const add=(nurseId,date,start,duration)=> state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId, date, start, duration});
+  // Transcribed from an actual week of this unit's paper/Excel schedule (Mon–Sun), names anonymized.
+  // Shorthand read as: bare "7A"/"9A" = a 12hr day shift starting then; ranges like "7A-330P" kept as their
+  // real, shorter length rather than rounded up to 12hrs. OFF/blank days are simply not assigned.
+  add("n1", DAYS[0], 7, 12);                    // Laurie Swift, Mon 7A
+  add("n2", DAYS[0], 19, 12);                   // Anthony Trocano, Mon 7P (circled on the original)
+  add("n2", DAYS[2], 7, 12); add("n2", DAYS[3], 7, 12); // Anthony, Wed & Thu 7A
+  add("n3", DAYS[2], 9, 12); add("n3", DAYS[3], 9, 12); // Christine Davis, Wed & Thu 9A (Fri–Sun OFF on the original)
+  add("n4", DAYS[0], 12, 10); add("n4", DAYS[1], 12, 10); add("n4", DAYS[4], 12, 10); add("n4", DAYS[6], 12, 10); // Kimberly Fritz, 12P-10P Mon/Tue/Fri/Sun
+  add("n5", DAYS[0], 7, 12);                    // Mary Ronca, Mon 7A
+  add("n5", DAYS[1], 7, 8);                     // Mary, Tue 7A-330P (real length, not rounded to 12)
+  add("n5", DAYS[4], 9, 12);                    // Mary, Fri 9A
+  add("n5", DAYS[6], 7, 8);                     // Mary, Sun 7A-330P
+  add("n6", DAYS[1], 7, 12);                    // Dawn Erickson, Tue 7A
+  add("n6", DAYS[4], 7, 12);                    // Dawn, Fri 7A
+  add("n6", DAYS[5], 9, 12);                    // Dawn, Sat 9A
+  add("n7", DAYS[4], 7, 12);                    // Edward Earvin, Fri 7A
+  add("n7", DAYS[6], 21, 10);                   // Edward, Sun 9P-7A
+  add("n10", DAYS[5], 21, 10);                  // Christina Stevens, Sat 9P-7A
+  // Arnetta Sciulli, Dyan Conaway, Faith Ndiga had no shifts on the original this particular week —
+  // left unassigned rather than invented. Note the original also flagged an unfilled 9P-7A need on Sunday
+  // night that nobody was covering; that gap is intentionally left open here too, for the same reason.
+
+  // Aides: the source photo's own handwritten aide summary (4-hour-block headcounts) was too ambiguous to
+  // transcribe reliably from a sideways photo, so this uses the verbal pattern you described instead.
+  add("p1", DAYS[0], 6, 12); add("p1", DAYS[2], 6, 12); add("p1", DAYS[4], 6, 12); // Hemant, 3x12 self-scheduled, 6a-6p
+  add("p2", DAYS[1], 18, 12); // Kapil (PRN) picked up a Tuesday overnight
+  add("p3", DAYS[5], 6, 12); // pool sitter covers a Saturday day shift neither aide took
+})();
+
+// Illustrative history only — this demo has no persistence, so there's no real past-week data yet.
+// Replace these with actual recorded weekly numbers once you're tracking them.
+// Real census/FTE/labor history now comes from state.census and state.assignments themselves,
+// aggregated in censusByWeek()/censusByMonth() below. Nothing synthetic is needed here anymore.
+
+let flashMessage = "";
+let autoFillNote = ""; // result of the last auto-fill; cleared by any other change so it never goes stale
+let confirmingClear = false;
+let confirmingRemoveId = null;
+let selDate = null, selStart = null, selEnd = null, pickingRange = false;
+
+/* ---- undo: snapshots the mutable data (not view state like which week or tab you're on) ---- */
+let undoStack = [];
+const MAX_UNDO = 30;
+function dataFields(){
+  return {
+    assignments: state.assignments, nurses: state.nurses, requests: state.requests,
+    census: state.census, holidays: state.holidays, requirement: state.requirement,
+    budget: state.budget, ratioTarget: state.ratioTarget, otThreshold: state.otThreshold,
+    manualFTE: state.manualFTE, syncedWeeks: state.syncedWeeks,
+    censusSubmissions: state.censusSubmissions, censusPrompt: state.censusPrompt,
+  };
+}
+function snapshot(){
+  autoFillNote = "";
+  undoStack.push(JSON.parse(JSON.stringify(dataFields())));
+  if(undoStack.length>MAX_UNDO) undoStack.shift();
+  markDirty();
+}
+function undo(){
+  if(!undoStack.length) return;
+  Object.assign(state, undoStack.pop());
+  confirmingClear=false; confirmingRemoveId=null; autoFillNote="";
+  flashMessage = "Last change undone.";
+  markDirty();
+  render();
+}
+function renderUndoControl(){
+  const el = document.getElementById("undoControl");
+  if(!el) return;
+  el.innerHTML = `<button class="btn secondary" style="padding:5px 10px;font-size:11.5px" onclick="undo()" ${undoStack.length?'':'disabled style="opacity:.4;cursor:default"'}>↺ Undo${undoStack.length?` (${undoStack.length})`:''}</button>`;
+}
+
+/* ---- persistence: the db capability when available (inside Claude's viewer, synced across
+   viewers), else localStorage (this browser only, no sync — what a GitHub Pages copy of this
+   file falls back to, since window.claude doesn't exist there). ----
+   Single document/key = simplest possible model and always internally consistent (one write = the
+   whole state, never a half-applied change split across pieces). The real cost on the db path:
+   that store has no transactions, so if the manager and a nurse both save within the same instant,
+   whichever write lands second overwrites the first's fields too, not just the ones that actually
+   collided. For one manager plus a handful of staff saving a few times a minute, that's an
+   acceptable near-term tradeoff, not a hidden one, this comment plus the visible sync status are
+   the disclosure. Revisit with per-section documents once real accounts exist and concurrent
+   editing is routine. The localStorage path has no such collision risk, because nothing else can
+   write it, but for the same reason it also never syncs between people or devices — only between
+   tabs of the same browser, via the native 'storage' event, wired in below. */
+const LS_KEY = "empath-scheduler-state-v1";
+let dbDoc = null, dbUnsub = null;
+let persistMode = "none"; // "cloud" | "local" | "none" — decided once at boot, in initPersistence
+let syncState = "loading"; // loading | saved | saving | dirty | unavailable | error
+let dirty = false, saving = false, saveTimer = null;
+function renderSyncStatus(){
+  const el = document.getElementById("syncStatus");
+  if(!el) return;
+  const localSuffix = persistMode==="local" ? " (this device only, won't sync or follow you elsewhere)" : "";
+  const map = {
+    loading:    ["Loading saved data…", "warn"],
+    saved:      [`Saved${localSuffix}`, "ok"],
+    saving:     ["Saving…", "warn"],
+    dirty:      ["Unsaved changes…", "warn"],
+    unavailable:["Not saved — this browser won't keep changes after you leave", "bad"],
+    error:      ["Save failed, retrying…", "bad"],
+  };
+  const [label,cls] = map[syncState] || ["",""];
+  el.innerHTML = label ? `<span class="flag ${cls}" style="font-size:10.5px" title="${cls==='bad'?'Changes only last until you close or refresh this tab.':''}">${label}</span>` : "";
+}
+function markDirty(){
+  if(persistMode==="none"){ syncState = syncState==="loading" ? "loading" : "unavailable"; renderSyncStatus(); return; }
+  dirty = true;
+  syncState = "dirty";
+  renderSyncStatus();
+  scheduleSave();
+}
+function scheduleSave(){
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 900);
+}
+async function doSave(){
+  if(persistMode==="none" || saving){ return; } // if a save is already in flight, its own completion re-checks `dirty` and reschedules
+  if(!dirty) return;
+  saving = true; dirty = false;
+  syncState = "saving"; renderSyncStatus();
+  try{
+    if(persistMode==="cloud"){
+      await dbDoc.set(dataFields());
+    } else {
+      localStorage.setItem(LS_KEY, JSON.stringify(dataFields()));
+    }
+    syncState = dirty ? "dirty" : "saved";
+  } catch(e){
+    dirty = true; // put it back, this attempt didn't land
+    syncState = "error";
+  } finally {
+    saving = false;
+    renderSyncStatus();
+    if(dirty) scheduleSave();
+  }
+}
+function applyLoadedData(data){
+  if(!data || typeof data!=="object") return;
+  // Field by field, so an older saved shape (missing a field this version added) just keeps
+  // that field's seeded default instead of wiping it or crashing.
+  Object.keys(dataFields()).forEach(k=>{ if(data[k]!==undefined) state[k] = data[k]; });
+}
+async function initPersistence(){
+  // Path 1: the db capability, only real inside Claude's viewer, and syncs across everyone with the page open.
+  if(typeof claude!=="undefined"){
+    let db;
+    try{ db = await claude.use("db"); } catch(e){ db = null; }
+    if(db){
+      dbDoc = db.doc("appstate/main");
+      persistMode = "cloud";
+      try{
+        const snap = await dbDoc.get();
+        if(snap.exists){ applyLoadedData(snap.data()); flashMessage = "Loaded your saved data."; }
+      } catch(e){ /* no saved copy yet, or a transient read error — proceed with the seeded starting data */ }
+      syncState = "saved";
+      render();
+      dbUnsub = dbDoc.onSnapshot(snap=>{
+        if(!snap.exists || snap.metadata.hasPendingWrites) return; // ignore the echo of our own unconfirmed write
+        applyLoadedData(snap.data());
+        render();
+      }, ()=>{ syncState="error"; renderSyncStatus(); });
+      return;
+    }
+  }
+  // Path 2: no db (e.g. this file hosted plainly, on GitHub Pages or opened straight from disk) —
+  // fall back to this browser's own localStorage, so at least this one person's own device keeps
+  // their data between visits, even though it can't sync to anyone else or follow them elsewhere.
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){ applyLoadedData(JSON.parse(raw)); flashMessage = "Loaded your saved data from this browser."; }
+    persistMode = "local";
+    syncState = "saved";
+    window.addEventListener("storage", e=>{
+      if(e.key!==LS_KEY || !e.newValue) return; // fires in OTHER tabs of this same browser when one of them saves
+      try{ applyLoadedData(JSON.parse(e.newValue)); render(); } catch(err){}
+    });
+  } catch(e){
+    // localStorage can throw (private/incognito mode with storage blocked, or a sandboxed frame) —
+    // degrade to no persistence at all rather than crash the app over it.
+    persistMode = "none";
+    syncState = "unavailable";
+  }
+  render();
+}
+
+/* ============ HELPERS ============ */
+let xlsxLoadPromise = null;
+function ensureXLSX(){
+  if(typeof XLSX!=="undefined") return Promise.resolve(true);
+  if(xlsxLoadPromise) return xlsxLoadPromise;
+  xlsxLoadPromise = new Promise(resolve=>{
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload = ()=>resolve(true);
+    s.onerror = ()=>resolve(false);
+    document.head.appendChild(s);
+  });
+  return xlsxLoadPromise;
+}
+function nurse(id){ return state.nurses.find(n=>n.id===id); }
+function isWeekend(iso){ const day = new Date(iso+"T00:00:00").getDay(); return day===0 || day===6; }
+function isHoliday(iso){ return state.holidays.includes(iso); }
+
+function occupiedByDate(a){
+  const out = {};
+  for(let h=0; h<a.duration; h++){
+    const hour = (a.start+h)%24;
+    const dayOffset = Math.floor((a.start+h)/24);
+    const d = addDays(a.date, dayOffset);
+    (out[d] = out[d]||[]).push(hour);
+  }
+  return out;
+}
+function coverageForDate(dateISO, roleFilter){
+  const cov = Array(24).fill(0);
+  const who = Array.from({length:24}, ()=>[]);
+  state.assignments.forEach(a=>{
+    const n = nurse(a.nurseId);
+    if(roleFilter && (!n || !roleFilter(n))) return;
+    const occ = occupiedByDate(a);
+    if(occ[dateISO]) occ[dateISO].forEach(h=>{ cov[h]++; who[h].push(a.nurseId); });
+  });
+  return {cov, who};
+}
+// Hours where a shift starts or ends, for this date — used to draw visible breaks on the coverage strip
+// so individual shifts are identifiable at a glance, not just a solid block of color.
+function shiftBoundaryHours(dateISO, roleFilter){
+  const boundaries = new Set();
+  state.assignments.forEach(a=>{
+    const n = nurse(a.nurseId);
+    if(roleFilter && (!n || !roleFilter(n))) return;
+    const occ = occupiedByDate(a)[dateISO];
+    if(!occ || !occ.length) return;
+    const sorted = [...occ].sort((x,y)=>x-y);
+    boundaries.add(sorted[0]);                 // this shift starts here
+    if(sorted[sorted.length-1]+1 <= 23) boundaries.add(sorted[sorted.length-1]+1); // this shift ends here
+  });
+  return boundaries;
+}
+function requiredForHour(h){ return Math.max((h>=7 && h<19) ? state.requirement.day : state.requirement.night, state.requirement.floor); }
+function avgStaffForBand(dateISO, startH, lenH){
+  const {cov} = coverageForDate(dateISO, n=>n.role!=="Aide");
+  let total=0;
+  for(let i=0;i<lenH;i++) total += cov[(startH+i)%24];
+  return total/lenH;
+}
+function weeklyHoursFor(nurseId){ return state.assignments.filter(a=>a.nurseId===nurseId && DAYS.includes(a.date)).reduce((s,a)=>s+a.duration,0); }
+function requiredFTE(){
+  let totalHours=0;
+  DAYS.forEach(()=>{ for(let h=0;h<24;h++) totalHours += requiredForHour(h); });
+  return totalHours/36;
+}
+function availableFTE(){ return state.nurses.filter(n=>n.role!=="Manager" && n.role!=="Aide").reduce((s,n)=>s+n.fte,0); }
+function approvedPTO(nurseId,date){ return state.requests.some(r=>r.nurseId===nurseId && r.date===date && (r.type==="PTO" || r.type==="Off") && r.status==="approved"); }
+function toAbs(date,hour){ return (new Date(date+"T00:00:00")).getTime()/3600000 + hour; }
+function restViolation(nurseId, date, start, duration, excludeId){
+  const others = state.assignments.filter(a=>a.nurseId===nurseId && a.id!==excludeId);
+  const newStart = toAbs(date,start), newEnd = newStart+duration;
+  for(const o of others){
+    const oStart = toAbs(o.date,o.start), oEnd = oStart+o.duration;
+    if(!(newEnd<=oStart || newStart>=oEnd)) return "overlap";
+    const gap = newStart>=oEnd ? newStart-oEnd : oStart-newEnd;
+    if(gap>=0 && gap<10) return "rest";
+  }
+  return null;
+}
+
+/* ---- equity score, corrected ---- */
+// Higher score = more burden the UNIT has imposed on this nurse (undesirable shifts, denied PTO,
+// denied shift-preference requests) minus benefits already received (approved PTO, approved shift
+// preferences). Holidays are weighted above weekends, above nights, matching the common real-world
+// ordering of how contested these shifts are. Overtime is deliberately NOT in this score: it's
+// separately compensated at 1.5x, unlike an undesirable shift worked at base rate, so it isn't the
+// same kind of burden. If your staff feels being asked to work OT is unfair regardless of the extra
+// pay, that's a weight to add with their input, not something to assume. Call-offs are NOT included
+// either: that's the nurse's own reliability record, not something the unit did to them.
+function scoreBreakdown(n){
+  return [
+    {label:"Nights worked YTD",         detail:`${n.nightsYTD} × 1.0`,  points:n.nightsYTD*1.0},
+    {label:"Weekends worked YTD",       detail:`${n.weekendsYTD} × 1.4`, points:n.weekendsYTD*1.4},
+    {label:"Holidays worked YTD",       detail:`${n.holidaysYTD} × 2.0`, points:n.holidaysYTD*2.0},
+    {label:"PTO requests denied",       detail:`${n.ptoDenied} × 1.5`,  points:n.ptoDenied*1.5},
+    {label:"PTO requests approved",     detail:`${n.ptoHonored} × -1.0`, points:-n.ptoHonored*1.0},
+    {label:"Shift preferences denied",  detail:`${n.prefDenied} × 1.0`,  points:n.prefDenied*1.0},
+    {label:"Shift preferences honored", detail:`${n.prefHonored} × -0.5`, points:-n.prefHonored*0.5},
+  ];
+}
+function equityScore(n){ return scoreBreakdown(n).reduce((s,x)=>s+x.points,0); }
+
+/* ============ RENDER ============ */
+const TABS = ["Coverage","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
+let activeTab = "Coverage";
+
+function render(){
+  DAYS = weekDays(state.weekStart);
+  renderModeToggle();
+  renderUndoControl();
+  renderSyncStatus();
+  renderStats();
+  renderNav();
+  renderMain();
+}
+function shiftWeek(n){ state.weekStart = addDays(state.weekStart, 7*n); render(); }
+function weekLabel(){
+  const end = addDays(state.weekStart,6);
+  return `${state.weekStart} – ${end}`;
+}
+function jumpToCurrentWeek(){
+  const dow = (new Date(todayISO()+"T00:00:00").getDay()+6)%7; // Monday-start index
+  state.weekStart = addDays(todayISO(), -dow);
+  render();
+}
+function weekNavControlHTML(){
+  return `
+    <div class="row" style="margin-bottom:12px">
+      <button class="btn secondary" onclick="shiftWeek(-1)">← Previous week</button>
+      <strong style="font-family:var(--mono)">${weekLabel()}</strong>
+      <button class="btn secondary" onclick="shiftWeek(1)">Next week →</button>
+      <button class="btn secondary" onclick="jumpToCurrentWeek()">This week</button>
+      <button class="btn secondary" onclick="state.weekStart='${WEEK_START}'; render()">Jump to demo week</button>
+    </div>`;
+}
+function renderModeToggle(){
+  document.getElementById("modeToggle").innerHTML = `
+    <div class="row" style="gap:6px">
+      <button class="btn ${state.mode==='manager'?'':'secondary'}" style="padding:5px 10px;font-size:11.5px" onclick="setMode('manager')">Manager view</button>
+      <button class="btn ${state.mode==='employee'?'':'secondary'}" style="padding:5px 10px;font-size:11.5px" onclick="setMode('employee')">Employee portal</button>
+    </div>`;
+}
+function setMode(m){ state.mode=m; flashMessage=""; render(); }
+function renderStats(){
+  const box = document.getElementById("statsBar");
+  if(state.mode==="employee"){ box.innerHTML=""; return; }
+  const reqFTE = requiredFTE(), availFTE = availableFTE(), gap = reqFTE-availFTE;
+  let shortHours=0;
+  DAYS.forEach(d=>{ const c=coverageForDate(d, n=>n.role!=="Aide").cov; for(let h=0;h<24;h++) if(c[h] < requiredForHour(h)) shortHours++; });
+  box.innerHTML = `
+    <div class="stat"><div class="n">${availFTE.toFixed(1)}</div><div class="l">Available FTE</div></div>
+    <div class="stat ${gap>0.3?'warn':'ok'}"><div class="n">${reqFTE.toFixed(1)}</div><div class="l">Target FTE (Coverage requirement)</div></div>
+    <div class="stat ${gap>0.3?'warn':'ok'}"><div class="n">${gap>0?'+':''}${gap.toFixed(1)}</div><div class="l">FTE gap</div></div>
+    <div class="stat ${shortHours>0?'warn':'ok'}"><div class="n">${shortHours}</div><div class="l">Understaffed hours / week</div></div>
+  `;
+}
+function pendingReviewCount(){
+  return state.requests.filter(r=>r.status==="pending").length + state.censusSubmissions.filter(c=>c.status==="pending").length;
+}
+function renderNav(){
+  const nv = document.getElementById("tabs");
+  if(state.mode==="employee"){ nv.innerHTML=""; return; }
+  const pending = pendingReviewCount();
+  nv.innerHTML = TABS.map(t=>`<button class="${t===activeTab?'active':''}" onclick="setTab('${t}')">${t}${t==="Requests" && pending?`<span class="badge" title="${pending} waiting for review">${pending}</span>`:''}</button>`).join("");
+}
+function setTab(t){ activeTab=t; flashMessage=""; autoFillNote=""; render(); }
+
+function renderMain(){
+  const m = document.getElementById("main");
+  if(state.mode==="employee"){ m.innerHTML = employeePortal(); return; }
+  if(activeTab==="Coverage") m.innerHTML = coverageTab();
+  if(activeTab==="Census & FTE") m.innerHTML = censusTab();
+  if(activeTab==="Trends & Budget") m.innerHTML = trendsTab();
+  if(activeTab==="Roster") m.innerHTML = rosterTab();
+  if(activeTab==="Requests") m.innerHTML = requestsTab();
+  if(activeTab==="Equity") m.innerHTML = equityTab();
+  if(activeTab==="Call-offs"){ m.innerHTML = calloutTab(); populateCalloffShifts(); }
+  if(activeTab==="Print") m.innerHTML = printTab();
+}
+
+/* ---- Coverage tab ---- */
+function coverageTab(){
+  const stripRows = DAYS.map((d,i)=>{
+    const {cov,who} = coverageForDate(d, n=>n.role!=="Aide");
+    const edges = shiftBoundaryHours(d, n=>n.role!=="Aide");
+    const ticks = cov.map((c,h)=>{
+      const req = requiredForHour(h);
+      let cls = c>=req ? "ok" : "short";
+      if(c===0) cls += " floor-fail";
+      if(edges.has(h)) cls += " shift-edge";
+      if(selDate===d && selStart!==null && h>=Math.min(selStart,selEnd) && h<=Math.max(selStart,selEnd)) cls += " selected";
+      const names = esc(who[h].map(id=>nurse(id)?.name.split(" ")[0]).join(", ") || "no one");
+      return `<div class="tick ${cls}" data-tip="${fmtHour(h)}: ${c} on / ${req} required — ${names}" onclick="tickClick('${d}',${h})"></div>`;
+    }).join("");
+    const {cov:aideCov, who:aideWho} = coverageForDate(d, n=>n.role==="Aide");
+    const aideEdges = shiftBoundaryHours(d, n=>n.role==="Aide");
+    const aideTicks = aideCov.map((c,h)=>{
+      const req = state.requirement.aideFloor;
+      let cls = c>=req ? "ok" : "short";
+      if(c===0) cls += " floor-fail";
+      if(aideEdges.has(h)) cls += " shift-edge";
+      if(selDate===d && selStart!==null && h>=Math.min(selStart,selEnd) && h<=Math.max(selStart,selEnd)) cls += " selected";
+      const names = esc(aideWho[h].map(id=>nurse(id)?.name.split(" ")[0]).join(", ") || "no one");
+      return `<div class="tick ${cls}" data-tip="${fmtHour(h)}: ${c} aide(s) on / ${req} required — ${names}" onclick="tickClick('${d}',${h})"></div>`;
+    }).join("");
+    const holidayTag = isHoliday(d) ? `<br><span class="pill" style="background:var(--amber-soft);color:var(--amber)">Holiday</span>` : "";
+    return `<div class="cov-day"><div class="lbl">${DAY_NAMES[i]}<br><span style="font-family:var(--mono);font-size:10.5px">${d.slice(5)}</span>${holidayTag}</div><div class="cov-ticks">${ticks}</div></div>
+      <div class="cov-day" style="padding-top:0"><div class="lbl" style="font-size:10.5px;color:var(--gold)">Aide</div><div class="cov-ticks">${aideTicks}</div></div>`;
+  }).join("");
+
+  const axis = Array.from({length:24},(_,h)=> h%3===0 ? `<div>${fmtHour(h)}</div>` : `<div></div>`).join("");
+
+  const scheduleRows = state.nurses.map(n=>{
+    const hrs = weeklyHoursFor(n.id);
+    const otTag = hrs>state.otThreshold ? `<span class="pill" style="background:var(--rust-soft);color:var(--rust)">OT +${hrs-state.otThreshold}h</span>` : "";
+    const cells = DAYS.map(d=>{
+      const shifts = state.assignments.filter(a=>a.nurseId===n.id && a.date===d);
+      const chips = shifts.map(a=>{
+        const isNight = a.start>=19 || a.start<7;
+        return `<span class="chip ${isNight?'night':''}">${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}
+          <button onclick="removeAssignment('${a.id}')" title="Remove">✕</button></span>`;
+      }).join("");
+      return `<td class="daycell">${chips}<br><button class="add-shift" onclick="openAddShift('${n.id}','${d}')">+ shift</button></td>`;
+    }).join("");
+    return `<tr><td><strong>${esc(n.name)}</strong><br><span class="pill ${n.role==='Manager'?'mgr':n.role==='Aide'?'aide':'rn'}">${n.role}</span> ${n.fte<1 && n.role!=='Aide'?'<span class="pill pt">PT</span>':''} ${otTag}</td>${cells}</tr>`;
+  }).join("");
+
+  return `
+    <div class="panel">
+      <h2>Editable weekly schedule</h2>
+      <p class="desc">Every nurse can have a fully custom start time and shift length, nothing is locked to a fixed 7-7 or 9-9 block unless you set it that way. A rust "OT" tag means this nurse is scheduled past ${state.otThreshold} hours this week, federal overtime territory under FLSA, at 1.5x pay on the excess. Adding a shift never blocks on this, it's a flag for you to weigh, not a hard rule.</p>
+      <div style="overflow-x:auto;">
+        <table><thead><tr><th>Nurse</th>${DAY_NAMES.map((d,i)=>`<th>${d} ${DAYS[i].slice(5)}</th>`).join("")}</tr></thead>
+        <tbody>${scheduleRows}</tbody></table>
+      </div>
+      <div id="addShiftForm"></div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn secondary" onclick="exportShiftsFile()">Export shifts (.xlsx)</button>
+      </div>
+      <div id="exportResult" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Hourly coverage</h2>
+      ${weekNavControlHTML()}
+      <p class="desc">Each tick is one hour, tap or click it to reassign or add coverage right there. Tap a second tick in the same day to extend the selection to everything between them, no modifier key needed, works the same with a mouse or a finger. Green means the assigned count meets the requirement for that hour. Rust means short; outlined rust means zero coverage, a hard floor failure. A dark left edge on a tick marks where a shift actually starts or ends, so you can see individual shifts breaking apart within the strip instead of one solid block of color. Hover or tap-and-hold a tick to see who's on. Amber "Holiday" tags mark configured holidays, edit the list in Census & FTE. The thin gold-labeled "Aide" row underneath each day tracks psychiatric aide coverage separately, it has its own always-on floor, not tied to the nurse ratio, since an aide doesn't satisfy that requirement.</p>
+      ${stripRows}
+      <div class="hour-axis"><div></div><div class="ha">${axis}</div></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--green);opacity:.55"></span> meets requirement</span>
+        <span><span class="swatch" style="background:var(--rust)"></span> below requirement</span>
+        <span><span class="swatch" style="background:var(--rust);box-shadow:0 0 0 1.5px var(--rust) inset"></span> zero coverage (floor violation)</span>
+      </div>
+      <div id="hourEditor"></div>
+      <div class="row" style="margin-top:14px;">
+        <div><label>Day band required (7a–7p)</label><input type="number" min="0" value="${state.requirement.day}" style="width:70px" onchange="setReq('day',this.value)"></div>
+        <div><label>Night band required (7p–7a)</label><input type="number" min="0" value="${state.requirement.night}" style="width:70px" onchange="setReq('night',this.value)"></div>
+        <div><label>Absolute floor, any hour</label><input type="number" min="1" value="${state.requirement.floor}" style="width:70px" onchange="setReq('floor',this.value)"></div>
+        <div><label>Aide floor, always on</label><input type="number" min="1" value="${state.requirement.aideFloor}" style="width:70px" onchange="setReq('aideFloor',this.value)"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Auto-fill gaps</h2>
+      <p class="desc">This is a rule-based heuristic, not a real optimizer, and it only fills shortfalls — it never touches an assignment you've already made. It only fills the RN/Manager ratio requirement, not the aide floor above, since aides self-schedule and this heuristic doesn't touch their coverage at all. For each day/night band it checks every hour in that band, not just its start, so a shorter shift that leaves a gap partway through still gets caught, then picks nurses who are free (not already working, not on approved PTO, rest-compliant), ranked by: (1) shift-time preference match first, (2) for day-band gaps, manager role gets soft priority, (3) fewest hours already scheduled this week, (4) lowest equity score, meaning least burden carried so far. It also swaps in a certified nurse if the block would otherwise have none available. It fills to close the worst hour in the band with a full-length shift, which can leave you looking overstaffed at the band's easier hours, that's the tradeoff for guaranteeing the worst gap actually closes.</p>
+      <div class="row">
+        <button class="btn" onclick="runAutoFill()">Auto-fill gaps</button>
+        ${confirmingClear
+          ? `<span class="flag bad">Clear all shifts this week?</span><button class="btn danger" onclick="confirmClearYes()">Yes, clear</button><button class="btn secondary" onclick="confirmClearNo()">Cancel</button>`
+          : `<button class="btn secondary" onclick="clearWeek()">Clear week</button>`}
+      </div>
+      ${autoFillNote ? `<div class="flag warn block" style="margin-top:10px">${autoFillNote}</div>` : ""}
+    </div>
+  `;
+}
+function setReq(k,v){ snapshot(); state.requirement[k]=Number(v); render(); }
+function removeAssignment(id){ snapshot(); state.assignments = state.assignments.filter(a=>a.id!==id); render(); }
+function clearWeek(){ confirmingClear=true; render(); }
+function confirmClearYes(){ snapshot(); state.assignments=[]; confirmingClear=false; render(); }
+function confirmClearNo(){ confirmingClear=false; render(); }
+
+function openAddShift(nurseId,date){
+  const box = document.getElementById("addShiftForm");
+  box.innerHTML = `
+    <div class="inline-form">
+      <div><label>Nurse</label><div style="padding:6px 0;font-weight:600">${esc(nurse(nurseId).name)} — ${date}</div></div>
+      <div><label>Start time</label><select id="asStart">${Array.from({length:24},(_,h)=>`<option value="${h}">${fmtHour(h)}</option>`).join("")}</select></div>
+      <div><label>Duration (hrs)</label><input type="number" id="asDur" value="12" min="1" max="16" style="width:60px"></div>
+      <button class="btn" onclick="confirmAddShift('${nurseId}','${date}')">Add shift</button>
+      <button class="btn secondary" onclick="document.getElementById('addShiftForm').innerHTML=''">Cancel</button>
+      <div id="asWarn"></div>
+    </div>`;
+  box.scrollIntoView({behavior:"smooth", block:"center"});
+}
+function confirmAddShift(nurseId,date){
+  const start = Number(document.getElementById("asStart").value);
+  const dur = Number(document.getElementById("asDur").value);
+  if(approvedPTO(nurseId,date)){ document.getElementById("asWarn").innerHTML = `<span class="flag bad">Blocked: approved PTO or Off this date</span>`; return; }
+  const viol = restViolation(nurseId,date,start,dur);
+  if(viol==="overlap"){ document.getElementById("asWarn").innerHTML = `<span class="flag bad">Overlaps an existing shift for this nurse</span>`; return; }
+  if(viol==="rest"){ document.getElementById("asWarn").innerHTML = `<span class="flag warn">Under 10hrs rest from an adjacent shift.</span> <button class="btn secondary" onclick="forceAdd('${nurseId}','${date}',${start},${dur})">Add anyway</button>`; return; }
+  snapshot();
+  state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId, date, start, duration:dur});
+  document.getElementById("addShiftForm").innerHTML=""; render();
+}
+function forceAdd(nurseId,date,start,dur){
+  snapshot();
+  state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId, date, start, duration:dur});
+  document.getElementById("addShiftForm").innerHTML=""; render();
+}
+
+/* ---- click-to-edit coverage tick, supports a shift-click range (does not touch equity fields) ---- */
+function tickClick(date, hour){
+  if(pickingRange && selDate===date && selStart!==null){
+    selEnd = hour;
+    pickingRange = false;
+  } else {
+    selDate = date; selStart = hour; selEnd = hour;
+    pickingRange = true;
+  }
+  render();
+  openHourEditor();
+}
+function openHourEditor(){
+  if(selDate===null) return;
+  const lo = Math.min(selStart,selEnd), hi = Math.max(selStart,selEnd);
+  const covering = state.assignments.filter(a=>{
+    const occ = occupiedByDate(a)[selDate];
+    return occ && occ.some(h=>h>=lo && h<=hi);
+  });
+  const rows = covering.map(a=>`
+    <div class="row" style="margin-bottom:6px">
+      <span style="font-family:var(--mono)">${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}</span>
+      <select onchange="reassignHour('${a.id}',this.value)">
+        ${state.nurses.map(n=>`<option value="${n.id}" ${n.id===a.nurseId?'selected':''}>${esc(n.name)}</option>`).join("")}
+      </select>
+      <button class="icon-btn" onclick="removeAssignment('${a.id}'); openHourEditor()" title="Remove">✕ remove</button>
+    </div>`).join("") || `<p class="empty" style="text-align:left;padding:4px 0">No one currently covers ${lo===hi?'this hour':'this range'}.</p>`;
+
+  const rangeLabel = lo===hi ? `${selDate}, ${fmtHour(lo)}` : `${selDate}, ${fmtHour(lo)}–${fmtHour(hi+1)} (${hi-lo+1} hrs selected)`;
+
+  document.getElementById("hourEditor").innerHTML = `
+    <div class="inline-form" style="flex-direction:column;align-items:stretch">
+      <strong>${rangeLabel}</strong>
+      ${rows}
+      <div class="row" style="margin-top:8px">
+        <div><label>Add coverage, nurse</label><select id="heNurse">${state.nurses.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join("")}</select></div>
+        <div><label>Start</label><select id="heStart">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===lo?'selected':''}>${fmtHour(h)}</option>`).join("")}</select></div>
+        <div><label>Duration (hrs)</label><input type="number" id="heDur" value="${hi-lo+1}" min="1" max="16" style="width:60px"></div>
+        <button class="btn" onclick="addHourCoverage()">Add</button>
+        <button class="btn secondary" onclick="selDate=null; pickingRange=false; document.getElementById('hourEditor').innerHTML=''; render()">Close</button>
+      </div>
+      <p class="foot-note" style="margin-top:6px">Tap another tick in this day to extend the range. Changes here only affect the schedule. They don't change anyone's equity score.</p>
+    </div>`;
+}
+function reassignHour(assignmentId, newNurseId){
+  snapshot();
+  const a = state.assignments.find(x=>x.id===assignmentId);
+  a.nurseId = newNurseId;
+  render(); openHourEditor();
+}
+function addHourCoverage(){
+  const nurseId = document.getElementById("heNurse").value;
+  const start = Number(document.getElementById("heStart").value);
+  const dur = Number(document.getElementById("heDur").value);
+  snapshot();
+  state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId, date:selDate, start, duration:dur});
+  render(); openHourEditor();
+}
+
+async function exportShiftsFile(){
+  const box = document.getElementById("exportResult");
+  if(typeof claude==="undefined"){ box.innerHTML = `<span class="flag bad">File downloads aren't available outside Claude's viewer. Use the Print tab's Grid or List format and print to PDF instead.</span>`; return; }
+  let downloads;
+  try{ downloads = await claude.use("downloads"); } catch(e){ downloads = null; }
+  if(!downloads){ box.innerHTML = `<span class="flag bad">File downloads aren't available in this viewer.</span>`; return; }
+  box.innerHTML = `<span class="flag warn">Preparing file…</span>`;
+  if(!(await ensureXLSX())){ box.innerHTML = `<span class="flag bad">Couldn't load the spreadsheet library, check your connection and try again.</span>`; return; }
+  const rows = [];
+  DAYS.forEach((d,i)=>{
+    state.assignments.filter(a=>a.date===d).sort((a,b)=>a.start-b.start).forEach(a=>{
+      const n = nurse(a.nurseId);
+      if(!n) return;
+      rows.push({
+        Date: d, Day: DAY_NAMES[i], Nurse: n.name, Role: n.role,
+        Start: fmtHour(a.start), End: fmtHour((a.start+a.duration)%24), "Duration (hrs)": a.duration,
+        Night: (a.start>=19||a.start<7) ? "Y":"", Weekend: isWeekend(d) ? "Y":"", Holiday: isHoliday(d) ? "Y":"",
+      });
+    });
+  });
+  if(!rows.length){ box.innerHTML = `<span class="flag warn">No shifts scheduled this week to export.</span>`; return; }
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Shifts");
+  const wbout = XLSX.write(wb, {bookType:"xlsx", type:"array"});
+  try{
+    await downloads.save({ filename: `empath-shifts-${state.weekStart}.xlsx`, data: new Blob([wbout]) });
+    box.innerHTML = `<span class="flag ok">Saved.</span>`;
+  } catch(err){
+    box.innerHTML = `<span class="flag bad">${err.code==='declined' ? 'Save cancelled.' : 'Export failed: '+err.message}</span>`;
+  }
+}
+
+/* ---- Auto-fill heuristic ---- */
+function shortHoursInWeek(){
+  let s=0;
+  DAYS.forEach(dt=>{ const c=coverageForDate(dt, n=>n.role!=="Aide").cov; for(let h=0;h<24;h++) if(c[h]<requiredForHour(h)) s++; });
+  return s;
+}
+function runAutoFill(){
+  snapshot();
+  const bands = [{start:7,label:"day"},{start:19,label:"night"}];
+  const shortBefore = shortHoursInWeek();
+  // Monday's early-morning hours (12a-7a) are covered by a shift that starts the Sunday night before,
+  // which sits just outside the week on screen. Plan that night band too, counting only the hours that land in this week.
+  const plan = [{d:addDays(DAYS[0],-1), b:bands[1], weekOnly:true}];
+  DAYS.forEach(d=>bands.forEach(b=>plan.push({d,b,weekOnly:false})));
+  let added = 0, addedBefore = 0;
+  plan.forEach(({d,b,weekOnly})=>{
+    const currentlyOn = new Set();      // anyone working AT the band's start hour, any role, used to avoid double-booking a new full-band pick
+    state.assignments.filter(a=>a.date===d).forEach(a=>{
+      const occ = occupiedByDate(a)[d]||[];
+      if(occ.includes(b.start)) currentlyOn.add(a.nurseId);
+    });
+    // Scan every hour in the band, not just its start hour: a shorter shift (say an 8hr 7A-330P)
+    // leaves a real gap later in the band that checking only hour 7 would never see. For the night
+    // band this crosses midnight into the next calendar date, so each hour is checked against
+    // whichever date it actually falls on.
+    let need = 0;
+    for(let h=0; h<12; h++){
+      const hour = (b.start+h)%24;
+      const dayOffset = Math.floor((b.start+h)/24);
+      const checkDate = dayOffset===0 ? d : addDays(d, dayOffset);
+      if(weekOnly && !DAYS.includes(checkDate)) continue;
+      const covCheck = coverageForDate(checkDate, n=>n.role!=="Aide").cov;
+      need = Math.max(need, requiredForHour(hour) - covCheck[hour]);
+    }
+    if(need<=0) return;
+    let eligible = state.nurses.filter(n=>{
+      if(n.role==="Aide") return false; // aides self-schedule, auto-fill doesn't touch their coverage
+      if(currentlyOn.has(n.id)) return false;
+      if(approvedPTO(n.id,d)) return false;
+      if(restViolation(n.id,d,b.start,12)) return false;
+      return true;
+    });
+    eligible.sort((a,c)=>{
+      const prefA = Math.abs(a.pref-b.start)<=2 ? 0:1, prefC = Math.abs(c.pref-b.start)<=2 ? 0:1;
+      if(prefA!==prefC) return prefA-prefC;
+      if(b.label==="day"){ const mgrA = a.role==="Manager"?0:1, mgrC = c.role==="Manager"?0:1; if(mgrA!==mgrC) return mgrA-mgrC; }
+      const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
+      if(hoursA!==hoursC) return hoursA-hoursC;
+      return equityScore(a)-equityScore(c);
+    });
+    const picks = eligible.slice(0,need);
+    const blockNurses = [...currentlyOn].map(nurse).filter(n=>n && n.role!=="Aide");
+    const hasCert = blockNurses.some(n=>n && n.cert) || picks.some(p=>p.cert);
+    if(!hasCert){
+      const certPick = eligible.find(n=>n.cert && !picks.includes(n));
+      if(certPick && picks.length) picks[picks.length-1] = certPick;
+    }
+    picks.forEach(n=>{
+      state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:n.id, date:d, start:b.start, duration:12});
+      added++; if(weekOnly) addedBefore++;
+    });
+  });
+  const shortAfter = shortHoursInWeek();
+  const hrs = n=>`${n} hour${n===1?"":"s"}`;
+  autoFillNote = (added
+      ? `Auto-fill added ${added} shift${added===1?"":"s"}${addedBefore?` (${addedBefore} of them start the Sunday night before this week, to cover Monday's early hours)`:""}, taking short hours from ${shortBefore} to ${shortAfter}. `
+      : `Auto-fill had nothing it could add. `)
+    + (shortAfter
+      ? `${hrs(shortAfter)} still below requirement: nobody is free for them (approved time off, rest rules, or already on shift). Add coverage by hand, or lower the requirement. `
+      : `Every nurse hour this week now meets the requirement. `)
+    + `Aide coverage isn't touched by auto-fill.`;
+  render();
+}
+
+/* ---- Census & FTE tab ---- */
+function censusTab(){
+  const rows = DAYS.map((d,i)=>{
+    const c = state.census[d] || {day:0,night:0};
+    const actualDay = avgStaffForBand(d, 7, 12);
+    const actualNight = avgStaffForBand(d, 19, 12);
+    return `<tr>
+      <td>${DAY_NAMES[i]} ${d.slice(5)}</td>
+      <td><input type="number" min="0" value="${c.day}" style="width:60px" onchange="setCensus('${d}','day',this.value)"></td>
+      <td>${actualDay.toFixed(1)}</td>
+      <td><input type="number" min="0" value="${c.night}" style="width:60px" onchange="setCensus('${d}','night',this.value)"></td>
+      <td>${actualNight.toFixed(1)}</td>
+    </tr>`;
+  }).join("");
+
+  let totalHours=0;
+  DAYS.forEach(d=>{
+    const c = state.census[d]||{day:0,night:0};
+    totalHours += Math.max(1,Math.ceil(c.day/state.ratioTarget))*12 + Math.max(1,Math.ceil(c.night/state.ratioTarget))*12;
+  });
+  const censusFTE = totalHours/36, reqFTE = requiredFTE(), availFTE = availableFTE();
+
+  return `
+    ${flashMessage ? `<div class="flag warn block">${flashMessage}</div>` : ""}
+    <div class="panel">
+      <h2>Set your target ratio and track census</h2>
+      ${weekNavControlHTML()}
+      <div class="row">
+        <div><label>Target ratio (nurse : patients)</label>
+          <div class="row" style="gap:4px">1 : <input type="number" min="1" step="0.5" value="${state.ratioTarget}" style="width:60px" onchange="setRatioTarget(this.value)"></div>
+        </div>
+      </div>
+      <table style="margin-top:10px"><thead><tr><th>Day</th><th>Day census</th><th>Actual staff on</th><th>Night census</th><th>Actual staff on</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <div class="row" style="margin-top:14px; gap:26px">
+        <div class="stat"><div class="n">${availFTE.toFixed(1)}</div><div class="l">Available FTE (roster)</div></div>
+        <div class="stat"><div class="n">${reqFTE.toFixed(1)}</div><div class="l">FTE from Coverage requirement (your policy floor)</div></div>
+        <div class="stat ${censusFTE>availFTE?'warn':'ok'}"><div class="n">${censusFTE.toFixed(1)}</div><div class="l">FTE the recorded census would have needed</div></div>
+      </div>
+      <p class="foot-note">"Actual staff on" is the real average headcount scheduled during that band, computed from your actual assignments, not a formula guess. Put next to the census you record, this is the evidence: if census was consistently high while actual staff stayed flat, that's the argument for more FTE, made with your own real numbers instead of a hypothetical. Census numbers here are placeholders until you replace them with your actual counts.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Import census/FTE from a spreadsheet</h2>
+      <p class="desc">Upload a .xlsx or .csv with a <strong>Date</strong> column, plus any of <strong>Day census</strong>, <strong>Night census</strong>, or <strong>FTE</strong> (column names are matched loosely, "Date", "day census", "Night", "FTE" all work). Rows with an FTE figure are used directly for that date's actual-FTE number instead of computing it from schedule data, since backdated weeks before this tool existed have no assignment history to compute from. This parses entirely in your browser, the file never leaves your machine.</p>
+      <div class="row">
+        <input type="file" accept=".xlsx,.xls,.csv" onchange="handleSpreadsheetUpload(this)">
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Import past shifts from a spreadsheet</h2>
+      <p class="desc">Upload a .xlsx or .csv with <strong>Date</strong>, <strong>Nurse</strong> (matched against names already in your Roster, add them there first if they're missing), <strong>Start</strong> (either an hour like <code>7a</code>/<code>9p</code>, or 0-23), and <strong>Duration</strong> in hours (or an <strong>End</strong> column instead, in the same format as Start). This is the same shape the "Export shifts" button on Coverage produces, so a file you export from here can be re-imported later or into another week. Also parses entirely in your browser.</p>
+      <div class="row">
+        <input type="file" accept=".xlsx,.xls,.csv" onchange="handleScheduleUpload(this)">
+      </div>
+      <p class="foot-note">Skips a row rather than guessing when the nurse name doesn't match anyone on your Roster, or the date/time can't be read, and tells you afterward what it skipped and why, rather than silently dropping rows.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Overtime and holiday rules</h2>
+      <p class="desc">Federal law (FLSA) triggers overtime at over 40 hours in a work week for hourly staff, no daily overtime rule applies in Pennsylvania the way it does in California. That threshold and your holiday calendar both drive pay in the Trends &amp; Budget tab and the OT flag on the schedule below. Holiday pay stacks with night/weekend differential here, confirmed as your actual policy: a nurse working a night shift that falls on a holiday gets both premiums added together, not just the larger one.</p>
+      <div class="row">
+        <div><label>Overtime threshold (hrs/week)</label><input type="number" min="1" value="${state.otThreshold}" style="width:80px" onchange="setOtThreshold(this.value)"></div>
+      </div>
+      <div class="row" style="margin-top:12px; align-items:flex-start">
+        <div>
+          <label>Configured holidays</label>
+          ${state.holidays.length ? state.holidays.sort().map(h=>`<div class="row" style="margin-bottom:4px"><span style="font-family:var(--mono)">${h}</span><button class="icon-btn" onclick="removeHoliday('${h}')">✕ remove</button></div>`).join("") : `<p class="empty">No holidays configured yet.</p>`}
+        </div>
+      </div>
+      <div class="inline-form">
+        <div><label>Add holiday date</label><input type="date" id="newHolidayDate"></div>
+        <button class="btn secondary" onclick="addHoliday()">Add</button>
+      </div>
+    </div>`;
+}
+function setCensus(date,field,val){ snapshot(); if(!state.census[date]) state.census[date]={day:0,night:0}; state.census[date][field]=Number(val); render(); }
+async function handleSpreadsheetUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  flashMessage = "Reading file…"; render();
+  if(!(await ensureXLSX())){
+    flashMessage = "Couldn't load the spreadsheet library, check your connection and try again.";
+    render();
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:"array", cellDates:true});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {defval:null});
+      if(!rows.length){ flashMessage = "That sheet has no rows."; render(); return; }
+      let imported=0, skipped=0;
+      snapshot();
+      rows.forEach(row=>{
+        const keys = Object.keys(row);
+        const dateKey = keys.find(k=>/date/i.test(k));
+        const dayKey = keys.find(k=>/day/i.test(k) && /cens/i.test(k)) || keys.find(k=>/^day$/i.test(k));
+        const nightKey = keys.find(k=>/night/i.test(k) && /cens/i.test(k)) || keys.find(k=>/^night$/i.test(k));
+        const fteKey = keys.find(k=>/fte/i.test(k));
+        if(!dateKey || row[dateKey]==null){ skipped++; return; }
+        let raw = row[dateKey], iso;
+        if(raw instanceof Date && !isNaN(raw)) iso = raw.toISOString().slice(0,10);
+        else { const d = new Date(raw); if(isNaN(d)){ skipped++; return; } iso = d.toISOString().slice(0,10); }
+        const day = dayKey && row[dayKey]!=null ? Number(row[dayKey]) : 0;
+        const night = nightKey && row[nightKey]!=null ? Number(row[nightKey]) : 0;
+        state.census[iso] = {day: isNaN(day)?0:day, night: isNaN(night)?0:night};
+        if(fteKey && row[fteKey]!=null && row[fteKey]!==""){
+          const f = Number(row[fteKey]);
+          if(!isNaN(f)) state.manualFTE[iso] = f;
+        }
+        imported++;
+      });
+      flashMessage = `Imported ${imported} date${imported===1?'':'s'}${skipped?`, skipped ${skipped} row${skipped===1?'':'s'} with no readable date`:''}.`;
+      input.value = "";
+      render();
+    } catch(err){
+      flashMessage = `Couldn't read that file (${err.message}). Needs to be a real .xlsx or .csv with a Date column.`;
+      render();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function parseHourLabel(v){
+  if(v==null || v==="") return null;
+  if(v instanceof Date && !isNaN(v)) return v.getHours();
+  if(typeof v==="number" && !isNaN(v)) return ((Math.round(v)%24)+24)%24;
+  const s = String(v).trim().toLowerCase();
+  let m = s.match(/^(\d{1,2})\s*(a|am|p|pm)$/);
+  if(m){ let h = Number(m[1])%12; if(m[2][0]==='p') h += 12; return h; }
+  m = s.match(/^(\d{1,2}):(\d{2})/);
+  if(m) return Number(m[1])%24;
+  const n = Number(s);
+  return isNaN(n) ? null : ((Math.round(n)%24)+24)%24;
+}
+async function handleScheduleUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  flashMessage = "Reading file…"; render();
+  if(!(await ensureXLSX())){
+    flashMessage = "Couldn't load the spreadsheet library, check your connection and try again.";
+    render();
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:"array", cellDates:true});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {defval:null});
+      if(!rows.length){ flashMessage = "That sheet has no rows."; render(); return; }
+      let imported=0, duplicates=0;
+      const skippedNames = new Set(), badDates = [], badTimes = [];
+      snapshot();
+      rows.forEach((row,i)=>{
+        const keys = Object.keys(row);
+        const dateKey = keys.find(k=>/date/i.test(k));
+        const nurseKey = keys.find(k=>/nurse/i.test(k)) || keys.find(k=>/name/i.test(k));
+        const startKey = keys.find(k=>/^start$/i.test(k)) || keys.find(k=>/start/i.test(k));
+        const endKey = keys.find(k=>/^end$/i.test(k)) || keys.find(k=>/end/i.test(k));
+        const durKey = keys.find(k=>/duration/i.test(k)) || keys.find(k=>/hours|hrs/i.test(k));
+        if(!dateKey || !nurseKey || row[dateKey]==null || row[nurseKey]==null) return;
+        let iso;
+        const raw = row[dateKey];
+        if(raw instanceof Date && !isNaN(raw)) iso = isoLocal(raw);
+        else { const d = new Date(raw); if(isNaN(d)){ badDates.push(`row ${i+2}`); return; } iso = isoLocal(d); }
+        const name = String(row[nurseKey]).trim().toLowerCase();
+        const n = state.nurses.find(x=>x.name.trim().toLowerCase()===name);
+        if(!n){ skippedNames.add(String(row[nurseKey]).trim()); return; }
+        const start = startKey!=null ? parseHourLabel(row[startKey]) : null;
+        if(start==null){ badTimes.push(`row ${i+2}`); return; }
+        let duration = durKey!=null && row[durKey]!=null ? Number(String(row[durKey]).replace(/[^0-9.]/g,"")) : null;
+        if((duration==null || isNaN(duration)) && endKey!=null){
+          const end = parseHourLabel(row[endKey]);
+          if(end!=null) duration = ((end - start + 24) % 24) || 24;
+        }
+        if(duration==null || isNaN(duration) || duration<=0){ badTimes.push(`row ${i+2}`); return; }
+        duration = Math.min(24, duration);
+        const already = state.assignments.some(a=>a.nurseId===n.id && a.date===iso && a.start===start && a.duration===duration);
+        if(already){ duplicates++; return; }
+        state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:n.id, date:iso, start, duration});
+        imported++;
+      });
+      const notes = [];
+      if(duplicates) notes.push(`${duplicates} already on the schedule, skipped`);
+      if(skippedNames.size) notes.push(`${skippedNames.size} name${skippedNames.size===1?"":"s"} not found in Roster: ${[...skippedNames].join(", ")}`);
+      if(badDates.length) notes.push(`${badDates.length} row(s) with an unreadable date (${badDates.slice(0,5).join(", ")}${badDates.length>5?"…":""})`);
+      if(badTimes.length) notes.push(`${badTimes.length} row(s) with an unreadable start time or duration (${badTimes.slice(0,5).join(", ")}${badTimes.length>5?"…":""})`);
+      flashMessage = `Imported ${imported} shift${imported===1?"":"s"}.${notes.length?" "+notes.join("; ")+".":""}`;
+      input.value = "";
+      render();
+    } catch(err){
+      flashMessage = `Couldn't read that file (${err.message}). Needs to be a real .xlsx or .csv with Date and Nurse columns.`;
+      render();
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function addHoliday(){
+  const v = document.getElementById("newHolidayDate").value;
+  if(v && !state.holidays.includes(v)){ snapshot(); state.holidays.push(v); }
+  render();
+}
+function removeHoliday(date){ snapshot(); state.holidays = state.holidays.filter(h=>h!==date); render(); }
+function setRatioTarget(v){ snapshot(); state.ratioTarget=Number(v); render(); }
+function setOtThreshold(v){ snapshot(); state.otThreshold=Number(v); render(); }
+function applySuggestedRequirement(){
+  let dayVals=[], nightVals=[];
+  DAYS.forEach(d=>{
+    const c = state.census[d]||{day:0,night:0};
+    dayVals.push(Math.max(1,Math.ceil(c.day/state.ratioTarget)));
+    nightVals.push(Math.max(1,Math.ceil(c.night/state.ratioTarget)));
+  });
+  state.requirement.day = Math.round(dayVals.reduce((a,b)=>a+b,0)/dayVals.length);
+  state.requirement.night = Math.round(nightVals.reduce((a,b)=>a+b,0)/nightVals.length);
+  activeTab="Coverage"; render();
+}
+
+/* ---- small inline SVG line chart, no external library ---- */
+function lineChartSVG(series, xLabels, opts={}){
+  const W=620,H=170,padL=36,padR=10,padT=10,padB=22;
+  const allVals = series.flatMap(s=>s.values).concat(opts.band?[opts.band[0],opts.band[1]]:[]);
+  const min = opts.min!==undefined?opts.min:Math.min(0,...allVals);
+  const max = opts.max!==undefined?opts.max:Math.max(...allVals)*1.15;
+  const n = xLabels.length;
+  const x = i => padL + (W-padL-padR) * (i/((n-1)||1));
+  const y = v => H-padB - (H-padT-padB) * ((v-min)/((max-min)||1));
+  let bandRect = "";
+  if(opts.band){
+    const y1=y(opts.band[1]), y2=y(opts.band[0]);
+    bandRect = `<rect x="${padL}" y="${y1.toFixed(1)}" width="${(W-padL-padR)}" height="${(y2-y1).toFixed(1)}" fill="#8C6FC9" opacity="0.10"/>`;
+  }
+  let refLine = "";
+  if(opts.ref!==undefined){
+    refLine = `<line x1="${padL}" x2="${W-padR}" y1="${y(opts.ref).toFixed(1)}" y2="${y(opts.ref).toFixed(1)}" stroke="#B5502E" stroke-width="1.5" stroke-dasharray="4,3"/>`;
+  }
+  const lines = series.map(s=>{
+    const pts = s.values.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const dots = s.values.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.5" fill="${s.color}"/>`).join("");
+    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"/>${dots}`;
+  }).join("");
+  const step = Math.ceil(n/7)||1;
+  const xAxisLabels = xLabels.map((l,i)=> i%step===0 ? `<text x="${x(i).toFixed(1)}" y="${H-6}" font-size="9" fill="#5B6672" text-anchor="middle">${l}</text>` : "").join("");
+  const yTicks = [min, (min+max)/2, max].map(v=>`<text x="${padL-6}" y="${(y(v)+3).toFixed(1)}" font-size="9" fill="#5B6672" text-anchor="end">${v.toFixed(1)}</text><line x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#EAEDEE" stroke-width="1"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;font-family:var(--mono)">${bandRect}${yTicks}${refLine}${lines}${xAxisLabels}</svg>`;
+}
+function reqFTEFromCensus(dayC,nightC,ratio){
+  return (Math.max(1,Math.ceil(dayC/ratio))*12*7 + Math.max(1,Math.ceil(nightC/ratio))*12*7)/36;
+}
+function laborCostForRange(dateSet){
+  let total = 0;
+  state.nurses.forEach(n=>{
+    const base = n.role==="Manager" ? state.budget.mgrWage : state.budget.rnWage;
+    const shifts = state.assignments.filter(a=>a.nurseId===n.id && dateSet.has(a.date))
+      .sort((a,b)=> a.date.localeCompare(b.date) || a.start-b.start);
+    let hoursSoFar = 0;
+    shifts.forEach(a=>{
+      const nightOrWeekend = (a.start>=19 || a.start<7) || isWeekend(a.date);
+      const holiday = isHoliday(a.date);
+      // stacks: both differentials add on top of base pay when both apply
+      let diffPct = 0;
+      if(nightOrWeekend) diffPct += state.budget.diffPct;
+      if(holiday) diffPct += state.budget.holidayDiffPct;
+      const rate = base * (1 + diffPct/100);
+      const regularLeft = Math.max(0, state.otThreshold - hoursSoFar);
+      const regHrs = Math.min(a.duration, regularLeft);
+      const otHrs = a.duration - regHrs;
+      total += regHrs*rate + otHrs*rate*1.5;
+      hoursSoFar += a.duration;
+    });
+  });
+  return total;
+}
+function laborCostThisWeek(){ return laborCostForRange(new Set(DAYS)); }
+function actualFTEForRange(dates){
+  let totalHours=0;
+  dates.forEach(d=>{
+    state.assignments.filter(a=>a.date===d).forEach(a=>{
+      const n = nurse(a.nurseId);
+      if(n && n.role!=="Aide") totalHours += a.duration;
+    });
+  });
+  return totalHours / (36/7 * dates.length); // normalizes any range length to a weekly-equivalent FTE
+}
+function avgManualFTE(dates){
+  const vals = dates.map(d=>state.manualFTE[d]).filter(v=>v!=null && !isNaN(v));
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+function censusByWeek(){
+  const weekMap = {};
+  Object.keys(state.census).forEach(dateISO=>{
+    const c = state.census[dateISO];
+    if(!c || (c.day===0 && c.night===0)) return;
+    const dow = (new Date(dateISO+"T00:00:00").getDay()+6)%7;
+    const wkStart = addDays(dateISO, -dow);
+    if(!weekMap[wkStart]) weekMap[wkStart] = {dayTotal:0,nightTotal:0,n:0};
+    weekMap[wkStart].dayTotal += c.day; weekMap[wkStart].nightTotal += c.night; weekMap[wkStart].n++;
+  });
+  return Object.keys(weekMap).sort().map(wk=>{
+    const w = weekMap[wk];
+    const wkDates = weekDays(wk);
+    const manual = avgManualFTE(wkDates);
+    return { label: wk.slice(5), avgDay: w.dayTotal/w.n, avgNight: w.nightTotal/w.n, actualFTE: manual!=null?manual:actualFTEForRange(wkDates), fromImport: manual!=null, dates: wkDates };
+  });
+}
+function censusByMonth(){
+  const monthMap = {};
+  Object.keys(state.census).forEach(dateISO=>{
+    const c = state.census[dateISO];
+    if(!c || (c.day===0 && c.night===0)) return;
+    const ym = dateISO.slice(0,7);
+    if(!monthMap[ym]) monthMap[ym] = {dayTotal:0,nightTotal:0,n:0};
+    monthMap[ym].dayTotal += c.day; monthMap[ym].nightTotal += c.night; monthMap[ym].n++;
+  });
+  return Object.keys(monthMap).sort().map(ym=>{
+    const m = monthMap[ym];
+    const [y,mo] = ym.split("-").map(Number);
+    const daysInMonth = new Date(y,mo,0).getDate();
+    const monthDates = Array.from({length:daysInMonth},(_,i)=>`${ym}-${String(i+1).padStart(2,'0')}`);
+    const label = new Date(ym+"-01T00:00:00").toLocaleString('en-US',{month:'short',year:'2-digit'});
+    const manual = avgManualFTE(monthDates);
+    return { label, avgDay: m.dayTotal/m.n, avgNight: m.nightTotal/m.n, actualFTE: manual!=null?manual:actualFTEForRange(monthDates), fromImport: manual!=null, dates: monthDates };
+  });
+}
+function setCensusViewMode(v){ state.censusViewMode=v; render(); }
+
+/* ---- Trends & Budget tab ---- */
+function trendsTab(){
+  const buckets = state.censusViewMode==="month" ? censusByMonth() : censusByWeek();
+  const labels = buckets.map(b=>b.label);
+  const availFTE = availableFTE();
+  const actualSeries = buckets.map(b=>b.actualFTE);
+  const bandLowSeries = buckets.map(b=>reqFTEFromCensus(b.avgDay,b.avgNight,6));
+  const bandHighSeries = buckets.map(b=>reqFTEFromCensus(b.avgDay,b.avgNight,4));
+  const bandLow = buckets.length ? Math.min(...bandLowSeries) : 0;
+  const bandHigh = buckets.length ? Math.max(...bandHighSeries, availFTE) : availFTE;
+  const censusDaySeries = buckets.map(b=>b.avgDay);
+  const censusNightSeries = buckets.map(b=>b.avgNight);
+  const laborSeries = buckets.map(b=>laborCostForRange(new Set(b.dates)));
+  const laborNow = laborCostThisWeek();
+  const laborVariance = laborNow - state.budget.weeklyTarget;
+  const notEnoughData = buckets.length < 2;
+
+  return `
+    <div class="panel no-print">
+      <h2>Weekly or monthly view</h2>
+      <p class="desc">Both charts and the printable report below use this. Data comes from what you've actually recorded in Census &amp; FTE and actually scheduled, grouped into whichever bucket you pick, nothing here is simulated.</p>
+      <div class="row">
+        <button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button>
+        <button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>FTE over time, vs a general-acuity reference band</h2>
+      ${weekNavControlHTML()}
+      <p class="desc">Straight answer on the national-benchmark question: there's no published number specific to the EmPATH model, it's too new and too operationally varied across hospitals for anyone to have built that dataset publicly. What's shown as the shaded band is the closest legitimate substitute: what your recorded census would require under general acute-psychiatric ratio law and proposals, 1:6 (California's mandated floor) at the low end and 1:4 (newer state proposals for psych emergency settings) at the high end. This is a reference range, not a true EmPATH average.</p>
+      ${notEnoughData ? `<p class="empty">Only ${buckets.length} ${state.censusViewMode==='month'?'month':'week'}${buckets.length===1?'':'s'} of recorded census so far, not enough to show a real trend yet. Keep recording census in the Census &amp; FTE tab, this fills in over time.</p>` : lineChartSVG(
+        [{name:"Actual FTE scheduled",color:"#8C6FC9",values:actualSeries}],
+        labels, {band:[bandLow,bandHigh], ref:availFTE}
+      )}
+      <div class="legend">
+        <span><span class="swatch" style="background:#8C6FC9"></span> Actual FTE scheduled</span>
+        <span>- - - Available FTE (current roster capacity: ${availFTE.toFixed(1)})</span>
+        <span><span class="swatch" style="background:#8C6FC9;opacity:.3"></span> Reference band, 1:6 to 1:4 general acute-psych ratios, from your recorded census</span>
+      </div>
+      <p class="foot-note">If the actual-FTE line consistently sits below the reference band while roster capacity (the dashed line) is flat, that's a real, data-backed case that census has outgrown current staffing, not a hypothetical.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Patient census over time</h2>
+      <p class="desc">No national comparison exists for this at all, unlike FTE there isn't even an adjacent legal benchmark to borrow, capacity and volume are entirely facility-specific. This is your own recorded trend only.</p>
+      ${notEnoughData ? `<p class="empty">Not enough recorded weeks yet to chart a trend.</p>` : lineChartSVG(
+        [{name:"Day census",color:"#3C7A4E",values:censusDaySeries},{name:"Night census",color:"#B8892B",values:censusNightSeries}],
+        labels, {max:12}
+      )}
+      <div class="legend">
+        <span><span class="swatch" style="background:#3C7A4E"></span> Avg day census</span>
+        <span><span class="swatch" style="background:#B8892B"></span> Avg night census</span>
+        <span style="color:var(--ink-soft)">Unit capacity ceiling: 12</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Labor budget tracker</h2>
+      <p class="desc">Wage defaults below use the BLS national median RN wage, about $48/hr as of the May 2025 OEWS release, not a confirmed Pittsburgh-specific figure, regional wages vary and you should replace this with your actual rate. Holiday differential stacks on top of night/weekend differential and both apply before the 1.5x overtime multiplier on hours past ${state.otThreshold}/week. This is real hours × rate math now, not a placeholder formula.</p>
+      <div class="row">
+        <button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button>
+        <button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <div><label>RN hourly wage ($)</label><input type="number" value="${state.budget.rnWage}" style="width:80px" onchange="setBudget('rnWage',this.value)"></div>
+        <div><label>Manager hourly wage ($)</label><input type="number" value="${state.budget.mgrWage}" style="width:80px" onchange="setBudget('mgrWage',this.value)"></div>
+        <div><label>Night/weekend differential (%)</label><input type="number" value="${state.budget.diffPct}" style="width:70px" onchange="setBudget('diffPct',this.value)"></div>
+        <div><label>Holiday differential (%)</label><input type="number" value="${state.budget.holidayDiffPct}" style="width:70px" onchange="setBudget('holidayDiffPct',this.value)"></div>
+        <div><label>Weekly budget target ($)</label><input type="number" value="${state.budget.weeklyTarget}" style="width:100px" onchange="setBudget('weeklyTarget',this.value)"></div>
+      </div>
+      <div class="row" style="margin-top:14px; gap:26px">
+        <div class="stat"><div class="n">$${laborNow.toFixed(0)}</div><div class="l">This week's scheduled labor cost</div></div>
+        <div class="stat"><div class="n">$${state.budget.weeklyTarget.toFixed ? state.budget.weeklyTarget.toFixed(0) : state.budget.weeklyTarget}</div><div class="l">Weekly budget target</div></div>
+        <div class="stat ${laborVariance>0?'warn':'ok'}"><div class="n">${laborVariance>0?'+':''}$${laborVariance.toFixed(0)}</div><div class="l">Variance</div></div>
+      </div>
+      ${notEnoughData ? `<p class="empty">Not enough recorded weeks yet to chart a labor cost trend.</p>` : lineChartSVG([{name:"Labor cost",color:"#B5502E",values:laborSeries}], labels, {ref:state.budget.weeklyTarget})}
+      <div class="legend">
+        <span><span class="swatch" style="background:#B5502E"></span> Labor cost</span>
+        <span>- - - budget target</span>
+      </div>
+      <p class="foot-note">Every point here is computed directly from actual scheduled shifts in that ${state.censusViewMode==='month'?'month':'week'}, including stacked night/weekend and holiday differentials and 1.5x overtime past ${state.otThreshold} hours. It still doesn't include benefits load or agency/travel nurse rates, both of which would push a real hospital's true labor cost higher than this.</p>
+    </div>
+  `;
+}
+function setBudget(field,val){ snapshot(); state.budget[field]=Number(val); render(); }
+
+/* ---- Roster tab ---- */
+function rosterTab(){
+  const rows = state.nurses.map(n=>`
+    <tr>
+      <td><input type="text" value="${n.name}" style="width:120px" onchange="updateNurse('${n.id}','name',this.value)"></td>
+      <td><select onchange="updateNurse('${n.id}','role',this.value)">${["RN","MHRN","Manager","Aide","Other"].map(r=>`<option ${n.role===r?'selected':''}>${r}</option>`).join("")}</select></td>
+      <td><input type="number" step="0.1" min="0" max="1" value="${n.fte}" style="width:60px" onchange="updateNurse('${n.id}','fte',Number(this.value))"></td>
+      <td><input type="checkbox" ${n.cert?'checked':''} onchange="updateNurse('${n.id}','cert',this.checked)"></td>
+      <td><select onchange="updateNurse('${n.id}','pref',Number(this.value))">${[7,9,11,19,21,23].map(h=>`<option value="${h}" ${n.pref===h?'selected':''}>${fmtHour(h)} start</option>`).join("")}</select></td>
+      <td>${weeklyHoursFor(n.id)} hrs</td>
+      <td>${confirmingRemoveId===n.id
+        ? `<button class="btn danger" style="padding:3px 7px;font-size:11px" onclick="confirmRemoveYes('${n.id}')">Confirm</button> <button class="btn secondary" style="padding:3px 7px;font-size:11px" onclick="confirmRemoveNo()">Cancel</button>`
+        : `<button class="icon-btn" onclick="removeNurse('${n.id}')" title="Remove nurse">✕ remove</button>`}</td>
+    </tr>`).join("");
+  return `
+    <div class="panel">
+      <h2>Roster</h2>
+      <p class="desc">Cert = crisis-intervention certified. Preferred start feeds the auto-fill engine for RNs and Managers, but never locks the manual schedule, you can override any assignment directly. Aides are excluded from auto-fill entirely, since they self-schedule, their preferred start here is just a note for you.</p>
+      <div style="overflow-x:auto;">
+      <table><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Cert</th><th>Preferred start</th><th>Hrs this wk</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      </div>
+      <div class="row" style="margin-top:12px;"><button class="btn secondary" onclick="addNurse()">+ Add nurse</button></div>
+    </div>`;
+}
+function updateNurse(id,field,val){ snapshot(); nurse(id)[field]=val; render(); }
+function removeNurse(id){ confirmingRemoveId=id; render(); }
+function confirmRemoveYes(id){ snapshot(); state.nurses = state.nurses.filter(n=>n.id!==id); state.assignments = state.assignments.filter(a=>a.nurseId!==id); confirmingRemoveId=null; render(); }
+function confirmRemoveNo(){ confirmingRemoveId=null; render(); }
+function addNurse(){
+  snapshot();
+  const id="n"+Math.random().toString(36).slice(2);
+  state.nurses.push({id,name:"New nurse",role:"RN",fte:1.0,cert:false,pref:7,nightsYTD:0,weekendsYTD:0,holidaysYTD:0,calloffs:0,ptoHonored:0,ptoDenied:0,prefHonored:0,prefDenied:0});
+  render();
+}
+
+/* ---- Requests tab ---- */
+function requestsTab(){
+  const order = {pending:0, approved:1, denied:2};
+  const sortedReqs = [...state.requests].sort((a,b)=> (order[a.status]-order[b.status]) || a.date.localeCompare(b.date));
+  const rows = sortedReqs.map(r=>`
+    <tr>
+      <td>${esc(nurse(r.nurseId)?.name || "—")}</td>
+      <td>${r.date}</td>
+      <td>${esc(reqLabel(r))}</td>
+      <td>${r.note ? esc(r.note) : `<span style="color:var(--ink-soft)">—</span>`}</td>
+      <td><span class="pill ${r.status}">${r.status}</span></td>
+      <td>${r.status==="pending" ? `
+          <button class="icon-btn" style="color:var(--green)" onclick="setReqStatus('${r.id}','approved')">✓ approve</button>
+          <button class="icon-btn" style="color:var(--rust)" onclick="setReqStatus('${r.id}','denied')">✕ deny</button>` : "—"}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="empty">No requests yet.</td></tr>`;
+
+  const cOrder = {pending:0, approved:1, rejected:2};
+  const subs = [...state.censusSubmissions].sort((a,b)=> (cOrder[a.status]-cOrder[b.status]) || b.date.localeCompare(a.date));
+  const cenRows = subs.map(s=>{
+    const n = nurse(s.nurseId);
+    const shifts = state.assignments.filter(a=>a.nurseId===s.nurseId && a.date===s.date).sort((a,b)=>a.start-b.start)
+      .map(a=>`${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}`).join(", ") || "not on schedule";
+    const conflicts = state.censusSubmissions.filter(o=>o.id!==s.id && o.date===s.date && o.status!=="rejected" &&
+      ((s.day!=null && o.day!=null && o.day!==s.day) || (s.night!=null && o.night!=null && o.night!==s.night)));
+    const flags = [];
+    if(conflicts.length) flags.push(`Differs from ${conflicts.map(o=>`${esc(nurse(o.nurseId)?.name||"someone")} (day ${o.day==null?"—":o.day} / night ${o.night==null?"—":o.night})`).join(", ")}`);
+    if((s.day!=null && s.day>12) || (s.night!=null && s.night>12)) flags.push("Above the unit's 12-patient capacity, likely a typo");
+    const cell = (field)=> s.status==="pending"
+      ? `<input type="number" min="0" value="${s[field]==null?"":s[field]}" style="width:56px" onchange="editCensusSub('${s.id}','${field}',this.value)">`
+      : (s[field]==null ? `<span style="color:var(--ink-soft)">—</span>` : s[field]);
+    return `<tr>
+      <td>${s.date}</td>
+      <td>${esc(n?n.name:"—")}</td>
+      <td>${shifts}</td>
+      <td>${cell("day")}</td>
+      <td>${cell("night")}</td>
+      <td>${s.note ? esc(s.note) : `<span style="color:var(--ink-soft)">—</span>`}${flags.map(f=>`<div class="flag warn" style="display:block;margin-top:4px">${f}</div>`).join("")}</td>
+      <td><span class="pill ${statusClass(s.status)}">${s.status}</span></td>
+      <td>${s.status==="pending" ? `
+          <button class="icon-btn" style="color:var(--green)" onclick="approveCensus('${s.id}')">✓ approve</button>
+          <button class="icon-btn" style="color:var(--rust)" onclick="rejectCensus('${s.id}')">✕ reject</button>` : "—"}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="8" class="empty">No census submissions yet. Staff send these from the Employee portal, for days they worked.</td></tr>`;
+
+  const nurseOpts = state.nurses.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join("");
+  const dateOpts = DAYS.map(d=>`<option value="${d}">${d}</option>`).join("");
+  return `
+    ${flashMessage ? `<div class="flag warn block">${flashMessage}</div>` : ""}
+    <div class="panel">
+      <h2>Staff requests</h2>
+      <p class="desc">Staff send these from the calendar in the Employee portal, and you can log one for them below. Approving PTO or Off removes any shift that nurse already has that day and stops them being scheduled, and both count toward their equity score (PTO carries more weight). A desired shift is informational: it counts toward equity but never puts anyone on the schedule, you build around it.</p>
+      <div style="overflow-x:auto;">
+      <table><thead><tr><th>Nurse</th><th>Date</th><th>Request</th><th>Note</th><th>Status</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      </div>
+      <div class="inline-form">
+        <div><label>Nurse</label><select id="reqNurse">${nurseOpts}</select></div>
+        <div><label>Date</label><select id="reqDate">${dateOpts}</select></div>
+        <div><label>Type</label><select id="reqType"><option>PTO</option><option>Off</option><option>Desired shift</option></select></div>
+        <button class="btn" onclick="addRequest()">Log request</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Census submitted by staff</h2>
+      <p class="desc">Staff send in the patient count for days they worked. Review each one, correct the number if it looks off, then approve to record it in Census &amp; FTE and the trend charts, or reject it. Several people can submit for the same day: approving overwrites the number recorded for that day and shift band, and conflicting counts are flagged so you can pick the right one.</p>
+      <div style="overflow-x:auto;">
+      <table><thead><tr><th>Date</th><th>Nurse</th><th>Their shift</th><th>Day</th><th>Night</th><th>Note</th><th>Status</th><th></th></tr></thead>
+      <tbody>${cenRows}</tbody></table>
+      </div>
+      <div class="inline-form">
+        <div style="flex:1;min-width:260px"><label>Wording staff see when submitting a count (pick one measure and keep it, or counts won't be comparable)</label>
+          <input type="text" style="width:100%" value="${esc(state.censusPrompt)}" onchange="setCensusPrompt(this.value)"></div>
+      </div>
+    </div>`;
+}
+function editCensusSub(id, field, val){
+  const s = state.censusSubmissions.find(x=>x.id===id); if(!s) return;
+  snapshot();
+  s[field] = (val==="" || isNaN(Number(val))) ? null : Math.max(0, Number(val));
+  render();
+}
+function approveCensus(id){
+  const s = state.censusSubmissions.find(x=>x.id===id); if(!s || s.status!=="pending") return;
+  if(s.day==null && s.night==null){ flashMessage = "That submission has no numbers to record. Enter a day or night count first, or reject it."; render(); return; }
+  snapshot();
+  s.status = "approved";
+  const cur = state.census[s.date] || {day:0,night:0};
+  const replaced = [];
+  if(s.day!=null){ if(cur.day && cur.day!==s.day) replaced.push(`day ${cur.day} → ${s.day}`); cur.day = s.day; }
+  if(s.night!=null){ if(cur.night && cur.night!==s.night) replaced.push(`night ${cur.night} → ${s.night}`); cur.night = s.night; }
+  state.census[s.date] = cur;
+  const n = nurse(s.nurseId);
+  flashMessage = `Approved ${esc(n?n.name:"staff")}'s census for ${s.date}${replaced.length?`, replacing the recorded ${esc(replaced.join(" and "))}`:""}. It now feeds Census & FTE and the trend charts.`;
+  render();
+}
+function rejectCensus(id){
+  const s = state.censusSubmissions.find(x=>x.id===id); if(!s || s.status!=="pending") return;
+  snapshot();
+  s.status = "rejected";
+  const n = nurse(s.nurseId);
+  flashMessage = `Rejected ${esc(n?n.name:"staff")}'s census for ${s.date}. They can send a corrected one.`;
+  render();
+}
+function setCensusPrompt(v){ snapshot(); state.censusPrompt = v; render(); }
+
+function setReqStatus(id,status){
+  const r = state.requests.find(r=>r.id===id);
+  const n = r && nurse(r.nurseId);
+  if(!r || r.status!=="pending") return;
+  if(!n){ flashMessage = "That nurse is no longer on the roster."; render(); return; }
+  snapshot();
+  r.status = status;
+  const removeShifts = ()=>{
+    const before = state.assignments.length;
+    state.assignments = state.assignments.filter(a=>!(a.nurseId===n.id && a.date===r.date));
+    return before - state.assignments.length;
+  };
+  const safeName = esc(n.name);
+  if(r.type==="PTO"){
+    if(status==="denied"){ n.ptoDenied += 1; flashMessage = `${safeName}'s PTO denied for ${r.date} — this adds to their equity score.`; }
+    else{
+      n.ptoHonored += 1;
+      const removed = removeShifts();
+      flashMessage = `${safeName}'s PTO approved for ${r.date}${removed?`, ${removed} conflicting shift(s) removed from Coverage`:''}. Equity score updated.`;
+    }
+  } else if(r.type==="Off"){
+    if(status==="denied"){ n.prefDenied += 1; flashMessage = `${safeName}'s Off request denied for ${r.date} — added to their equity score.`; }
+    else{
+      n.prefHonored += 1;
+      const removed = removeShifts();
+      flashMessage = `${safeName}'s Off request approved for ${r.date}${removed?`, ${removed} conflicting shift(s) removed from Coverage`:''}. They won't be scheduled that day, and it counts toward their equity score at a lower weight than PTO.`;
+    }
+  } else {
+    // Desired shift: informational. Counts toward equity, but never moves a shift on its own.
+    if(status==="denied"){ n.prefDenied += 1; flashMessage = `${safeName}'s desired shift for ${r.date} denied — added to their equity score.`; }
+    else{ n.prefHonored += 1; flashMessage = `${safeName}'s desired shift (${esc(reqLabel(r))}) for ${r.date} approved — counted in their equity score. This doesn't put them on the schedule, build it in yourself.`; }
+  }
+  render();
+}
+function addRequest(){
+  const nurseId = document.getElementById("reqNurse").value;
+  const date = document.getElementById("reqDate").value;
+  const type = document.getElementById("reqType").value;
+  snapshot();
+  state.requests.push({id:"r"+Math.random().toString(36).slice(2), nurseId, date, type, status:"pending"});
+  render();
+}
+
+/* ---- Equity tab ---- */
+function syncEquityFromWeek(){
+  const wk = state.weekStart;
+  if(state.syncedWeeks.includes(wk)){
+    flashMessage = `${weekLabel()} was already synced into YTD totals. Use Undo (top of page) if you need to redo it.`;
+    render(); return;
+  }
+  snapshot();
+  const tally = {};
+  DAYS.forEach(d=>{
+    const isWknd = isWeekend(d), isHol = isHoliday(d);
+    state.assignments.filter(a=>a.date===d).forEach(a=>{
+      const n = nurse(a.nurseId);
+      if(!n || n.role==="Aide") return;
+      if(!tally[n.id]) tally[n.id] = {nights:0,weekends:0,holidays:0};
+      const isNight = a.start>=19 || a.start<7;
+      if(isNight) tally[n.id].nights++;
+      if(isWknd) tally[n.id].weekends++;
+      if(isHol) tally[n.id].holidays++;
+    });
+  });
+  Object.keys(tally).forEach(id=>{
+    const n = nurse(id);
+    n.nightsYTD += tally[id].nights;
+    n.weekendsYTD += tally[id].weekends;
+    n.holidaysYTD += tally[id].holidays;
+  });
+  state.syncedWeeks.push(wk);
+  const count = Object.keys(tally).length;
+  flashMessage = count
+    ? `Synced ${count} nurse${count===1?'':'s'}' actual nights/weekends/holidays from ${weekLabel()} into their YTD totals. This week won't be double-counted if you sync again.`
+    : `No RN/Manager shifts found in ${weekLabel()} to sync.`;
+  render();
+}
+function equityField(n, field, width){
+  return `<input type="number" min="0" value="${n[field]}" style="width:${width||50}px" onchange="updateNurse('${n.id}','${field}',Number(this.value))">`;
+}
+function equityTab(){
+  const sorted = state.nurses.filter(n=>n.role!=="Aide").sort((a,b)=>equityScore(b)-equityScore(a));
+  const rows = sorted.map(n=>`
+    <tr>
+      <td>${esc(n.name)}</td>
+      <td>${equityField(n,'nightsYTD')}</td>
+      <td>${equityField(n,'weekendsYTD')}</td>
+      <td>${equityField(n,'holidaysYTD')}</td>
+      <td>${equityField(n,'ptoDenied')}</td>
+      <td>${equityField(n,'ptoHonored')}</td>
+      <td>${equityField(n,'prefDenied')}</td>
+      <td>${equityField(n,'prefHonored')}</td>
+      <td>${equityField(n,'calloffs')}</td>
+      <td><strong>${equityScore(n).toFixed(1)}</strong></td>
+    </tr>`).join("");
+  return `
+    <div class="panel">
+      <h2>Equity score, rolling YTD</h2>
+      ${flashMessage ? `<div class="flag warn block">${flashMessage}</div>` : ""}
+      <p class="desc">Every number below is directly editable, use that now to enter real backdated totals since this tool has no history of its own yet. Going forward, use "Sync this week into YTD" below instead of hand-editing, it adds actual worked nights/weekends/holidays from whichever week you're viewing in Coverage, once, so you don't have to keep re-typing running totals yourself. PTO and preference columns already update automatically when you approve or deny a request in the Requests tab, editing them here just corrects them if needed.</p>
+      <div class="row" style="margin-bottom:14px">
+        <button class="btn secondary" onclick="syncEquityFromWeek()">Sync this week (${weekLabel()}) into YTD</button>
+      </div>
+      <div style="overflow-x:auto;">
+      <table><thead><tr><th>Nurse</th><th>Nights YTD</th><th>Weekends YTD</th><th>Holidays YTD</th><th>PTO denied</th><th>PTO approved</th><th>Pref. denied</th><th>Pref. honored</th><th>Call-offs</th><th>Score</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      </div>
+      <p class="foot-note">Aides aren't included here on purpose: they self-schedule, so a fairness model built around who the unit assigns undesirable shifts to doesn't fit a role that picks its own hours. Call-offs are shown but not counted in the score, on purpose, same for overtime hours worked, both explained above the formula in the code. Formula: nights×1.0 + weekends×1.4 + holidays×2.0 + PTOdenied×1.5 − PTOapproved×1.0 + prefDenied×1.0 − prefHonored×0.5. These weights are all placeholders, set them with staff input before you trust this for real decisions.</p>
+    </div>`;
+}
+
+/* ---- Call-offs tab ---- */
+function calloutTab(){
+  const nurseOpts = state.nurses.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join("");
+  return `
+    <div class="panel">
+      <h2>Log a call-off</h2>
+      <p class="desc">Choose who's calling off, then which of their scheduled shifts. You'll get a ranked, rest-and-certification-aware replacement list.</p>
+      <div class="row">
+        <div><label>Nurse calling off</label><select id="coNurse" onchange="populateCalloffShifts()">${nurseOpts}</select></div>
+        <div><label>Shift</label><select id="coShift"></select></div>
+        <button class="btn" onclick="runCallout()">Find replacements</button>
+      </div>
+      <div id="calloutResults" style="margin-top:14px;"></div>
+    </div>`;
+}
+function populateCalloffShifts(){
+  const sel = document.getElementById("coShift");
+  if(!sel) return;
+  const nurseId = document.getElementById("coNurse").value;
+  const shifts = state.assignments.filter(a=>a.nurseId===nurseId).sort((a,b)=>a.date.localeCompare(b.date)||a.start-b.start);
+  sel.innerHTML = shifts.map(a=>`<option value="${a.id}">${a.date} ${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}</option>`).join("") || `<option value="">No shifts scheduled</option>`;
+}
+function runCallout(){
+  const id = document.getElementById("coShift").value;
+  const a = state.assignments.find(x=>x.id===id);
+  const results = document.getElementById("calloutResults");
+  if(!a){ results.innerHTML = `<p class="empty">This nurse has no scheduled shifts to call off.</p>`; return; }
+  const calledOff = nurse(a.nurseId);
+  const eligible = state.nurses.filter(n=>{
+    if(n.id===a.nurseId) return false;
+    if(approvedPTO(n.id,a.date)) return false;
+    return !restViolation(n.id,a.date,a.start,a.duration);
+  }).sort((x,y)=> equityScore(x)-equityScore(y));
+
+  const list = eligible.slice(0,5).map(n=>`
+    <li><strong>${esc(n.name)}</strong> — equity score ${equityScore(n).toFixed(1)}, ${weeklyHoursFor(n.id)}hrs already this week
+      ${n.cert?'<span class="pill cert">cert</span>':'<span class="pill nocert">no cert</span>'}
+      <button class="btn secondary" style="margin-left:8px;padding:3px 8px;font-size:11px" onclick="assignReplacement('${a.id}','${n.id}')">Assign</button>
+    </li>`).join("");
+
+  results.innerHTML = `
+    ${calledOff.cert ? `<div class="flag warn block">${esc(calledOff.name)} is crisis-certified, try to replace with another certified nurse if the block would otherwise have none.</div>` : ""}
+    <p style="margin:0 0 6px;font-size:12.5px;color:var(--ink-soft)">Ranked lowest equity score first, meaning least burden carried so far, among those rest-compliant and not on approved PTO:</p>
+    <ol class="rank-list">${list || "<li>No eligible replacement found without a rest or PTO conflict.</li>"}</ol>`;
+}
+function assignReplacement(assignmentId, nurseId){
+  snapshot();
+  const a = state.assignments.find(x=>x.id===assignmentId);
+  a.nurseId = nurseId;
+  activeTab="Coverage"; render();
+}
+
+/* ---- Print tab ---- */
+function setPrintOpt(field,val){ state.printOpts[field]=val; render(); }
+function printGridHTML(){
+  const note = state.printOpts.note;
+  const headerCells = DAYS.map((d,i)=>{
+    const hol = state.printOpts.includeHoliday && isHoliday(d) ? " ★" : "";
+    return `<th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">${DAY_NAMES[i]} ${d.slice(5)}${hol}</th>`;
+  }).join("");
+  const rows = state.nurses.map(n=>{
+    const hrs = weeklyHoursFor(n.id);
+    const otBadge = (state.printOpts.includeOT && hrs>state.otThreshold) ? ` (OT +${hrs-state.otThreshold}h)` : "";
+    const roleTxt = state.printOpts.includeRole ? `, ${n.role}` : "";
+    const cells = DAYS.map(d=>{
+      const shifts = state.assignments.filter(a=>a.nurseId===n.id && a.date===d).sort((a,b)=>a.start-b.start);
+      return `<td style="border:1px solid #999;padding:4px 6px;font-size:11px;vertical-align:top">${shifts.map(a=>`${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}`).join("<br>")}</td>`;
+    }).join("");
+    return `<tr><td style="border:1px solid #999;padding:4px 6px;font-size:11px;font-weight:600;white-space:nowrap">${esc(n.name)}${roleTxt}${otBadge}</td>${cells}</tr>`;
+  }).join("");
+  return `
+    <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
+    <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabel()}${note?` — ${note}`:""}</p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr><th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Nurse</th>${headerCells}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${state.printOpts.includeHoliday && state.holidays.some(h=>DAYS.includes(h)) ? `<p style="font-size:10px;color:#666;margin-top:8px">★ = configured holiday</p>` : ""}
+  `;
+}
+function printListHTML(){
+  const note = state.printOpts.note;
+  const sections = DAYS.map((d,i)=>{
+    const shifts = state.assignments.filter(a=>a.date===d).sort((a,b)=>a.start-b.start);
+    const hol = state.printOpts.includeHoliday && isHoliday(d) ? " (Holiday)" : "";
+    const rows = shifts.map(a=>{
+      const n = nurse(a.nurseId); if(!n) return "";
+      const roleTxt = state.printOpts.includeRole ? ` (${n.role})` : "";
+      const hrs = weeklyHoursFor(n.id);
+      const otBadge = (state.printOpts.includeOT && hrs>state.otThreshold) ? " [OT]" : "";
+      return `<div style="font-size:12px;padding:2px 0">${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)} — ${esc(n.name)}${roleTxt}${otBadge}</div>`;
+    }).join("") || `<div style="font-size:12px;color:#888">No shifts scheduled.</div>`;
+    return `<div style="margin-bottom:14px;page-break-inside:avoid;">
+      <h3 style="margin:0 0 4px;font-size:13px;border-bottom:1px solid #999;padding-bottom:2px">${DAY_NAMES[i]}, ${d}${hol}</h3>
+      ${rows}
+    </div>`;
+  }).join("");
+  return `
+    <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
+    <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabel()}${note?` — ${note}`:""}</p>
+    ${sections}
+  `;
+}
+function printCensusHistoryHTML(){
+  const buckets = state.censusViewMode==="month" ? censusByMonth() : censusByWeek();
+  const note = state.printOpts.note;
+  const rows = buckets.map(b=>`
+    <tr>
+      <td style="border:1px solid #999;padding:4px 6px;font-size:11px">${b.label}</td>
+      <td style="border:1px solid #999;padding:4px 6px;font-size:11px">${b.avgDay.toFixed(1)}</td>
+      <td style="border:1px solid #999;padding:4px 6px;font-size:11px">${b.avgNight.toFixed(1)}</td>
+      <td style="border:1px solid #999;padding:4px 6px;font-size:11px">${b.actualFTE.toFixed(1)}${b.fromImport?' *':''}</td>
+      <td style="border:1px solid #999;padding:4px 6px;font-size:11px">${availableFTE().toFixed(1)}</td>
+    </tr>`).join("") || `<tr><td colspan="5" style="padding:8px;font-size:11px;color:#666">No recorded census yet.</td></tr>`;
+  return `
+    <h2 style="margin:0 0 4px">EMPATH Unit — Census &amp; FTE History (${state.censusViewMode==='month'?'Month over month':'Week over week'})</h2>
+    <p style="margin:0 0 12px;color:#444;font-size:12px">${note?note+" — ":""}Generated ${new Date().toLocaleDateString()}</p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr>
+        <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">${state.censusViewMode==='month'?'Month':'Week of'}</th>
+        <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Avg day census</th>
+        <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Avg night census</th>
+        <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Actual FTE scheduled</th>
+        <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Available FTE (roster)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p style="font-size:10px;color:#666;margin-top:10px">Every number above comes from recorded census entries and actual scheduled shifts, nothing simulated. * = FTE imported directly from a spreadsheet rather than computed from schedule data (used for backdated weeks with no assignment history).</p>
+  `;
+}
+function printTab(){
+  const fmt = state.printOpts.format;
+  const body = fmt==="grid" ? printGridHTML() : fmt==="list" ? printListHTML() : printCensusHistoryHTML();
+  return `
+    <div class="panel no-print">
+      <h2>Print schedule</h2>
+      ${weekNavControlHTML()}
+      <p class="desc">Choose a format, the preview below updates live and is exactly what prints. Everything except the preview is hidden automatically when you print, whether you use the button here or your browser's own print command.</p>
+      <div class="row">
+        <div><label>Format</label><select onchange="setPrintOpt('format',this.value)">
+          <option value="grid" ${fmt==='grid'?'selected':''}>Grid, nurse × day</option>
+          <option value="list" ${fmt==='list'?'selected':''}>Daily list, chronological</option>
+          <option value="census" ${fmt==='census'?'selected':''}>Census &amp; FTE history</option>
+        </select></div>
+        <div><label>Orientation</label><select onchange="setPrintOpt('orientation',this.value)">
+          <option value="portrait" ${state.printOpts.orientation==='portrait'?'selected':''}>Portrait</option>
+          <option value="landscape" ${state.printOpts.orientation==='landscape'?'selected':''}>Landscape</option>
+        </select></div>
+      </div>
+      ${fmt==='census' ? `<div class="row" style="margin-top:8px"><button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button><button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button></div>` : ''}
+      <div class="row" style="margin-top:10px">
+        <label class="row" style="gap:5px"><input type="checkbox" ${state.printOpts.includeRole?'checked':''} onchange="setPrintOpt('includeRole',this.checked)"> Show role</label>
+        <label class="row" style="gap:5px"><input type="checkbox" ${state.printOpts.includeOT?'checked':''} onchange="setPrintOpt('includeOT',this.checked)"> Flag overtime</label>
+        <label class="row" style="gap:5px"><input type="checkbox" ${state.printOpts.includeHoliday?'checked':''} onchange="setPrintOpt('includeHoliday',this.checked)"> Mark holidays</label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div style="flex:1;min-width:220px"><label>Header note, optional</label><input type="text" style="width:100%" value="${state.printOpts.note}" placeholder="e.g. Draft, subject to change" onchange="setPrintOpt('note',this.value)"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" onclick="window.print()">Print</button>
+      </div>
+      <p class="foot-note">If Print doesn't open a dialog, this viewer is blocking that call, use Ctrl+P (Windows/Linux) or Cmd+P (Mac) instead, the preview below prints the same either way. Landscape/portrait is a request to your browser's print dialog, most browsers respect it but let you override it there too.</p>
+    </div>
+    <div class="panel" id="printArea">
+      ${body}
+    </div>
+    <style>@page { size: ${state.printOpts.orientation}; margin: 1.5cm; }</style>
+  `;
+}
+
+/* ---- Employee portal ---- */
+function setEmployeeView(v){ state.employeeView=v; flashMessage=""; render(); }
+function empMonthKey(){ return state.employeeMonth || state.weekStart.slice(0,7); }
+function shiftEmployeeMonth(n){
+  const [y,m] = empMonthKey().split("-").map(Number);
+  const d = new Date(y, m-1+n, 1);
+  state.employeeMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  state.empSel = {start:null,end:null,picking:false};
+  flashMessage = "";
+  render();
+}
+function jumpEmployeeToday(){
+  state.employeeMonth = todayISO().slice(0,7);
+  state.empSel = {start:null,end:null,picking:false};
+  flashMessage = "";
+  render();
+}
+// Past days (and today) select one day at a time, for census. Future days can be a range, for requests.
+function empDayClick(dateISO){
+  const today = todayISO(), s = state.empSel;
+  flashMessage = "";
+  if(dateISO <= today) state.empSel = {start:dateISO,end:dateISO,picking:false};
+  else if(s.picking && s.start && s.start > today) state.empSel = {start:s.start,end:dateISO,picking:false};
+  else state.empSel = {start:dateISO,end:dateISO,picking:true};
+  render();
+}
+function empSelDates(){
+  const s = state.empSel; if(!s.start) return [];
+  const a = s.start<=s.end ? s.start : s.end, b = s.start<=s.end ? s.end : s.start;
+  const out=[]; let d=a, guard=0;
+  while(d<=b && guard<62){ out.push(d); d=addDays(d,1); guard++; }
+  return out;
+}
+function clearEmpSel(){ state.empSel={start:null,end:null,picking:false}; render(); }
+function setEmpReqType(v){ state.empReqType=v; render(); }
+
+// Which shift bands (day 7a-7p, night 7p-7a) a nurse's shifts on a date touched, so the census form only asks for those.
+function bandsWorked(nurseId, dateISO){
+  let day=false, night=false;
+  state.assignments.filter(a=>a.nurseId===nurseId && a.date===dateISO).forEach(a=>{
+    const s=a.start, e=a.start+a.duration;
+    if(s<19 && e>7) day=true;
+    if(e>19) night=true;
+  });
+  if(!day && !night){ day=true; night=true; }
+  return {day,night};
+}
+
+function dayDotsHTML(d, shifts, reqs, cen, today){
+  const dots = [];
+  if(shifts.length) dots.push('<span class="dot dot-shift" title="Scheduled"></span>');
+  if(reqs && reqs.length){
+    const pri = r => r.status==="pending"?0:r.status==="approved"?1:2;
+    const worst = [...reqs].sort((a,b)=>pri(a)-pri(b))[0];
+    dots.push(`<span class="dot dot-${statusClass(worst.status)}" title="${esc(reqLabel(worst))}: ${worst.status}"></span>`);
+  }
+  if(shifts.length && d<=today){
+    dots.push(cen ? `<span class="dot dot-${statusClass(cen.status)}" title="Census ${cen.status}"></span>`
+                  : `<span class="dot dot-due" title="Census not sent"></span>`);
+  }
+  return dots.length ? `<div class="cal-dots">${dots.join("")}</div>` : "";
+}
+// One-line recap of a single day: shift, any request, census status. This is what makes tapping a
+// day meaningful on a phone, where the grid itself only shows dots, not full detail.
+function dayStatusSummaryHTML(empId, date){
+  const shifts = state.assignments.filter(a=>a.nurseId===empId && a.date===date).sort((a,b)=>a.start-b.start);
+  const reqs = state.requests.filter(r=>r.nurseId===empId && r.date===date);
+  const cen = state.censusSubmissions.filter(c=>c.nurseId===empId && c.date===date).slice(-1)[0];
+  const parts = [shifts.length ? `Shift: ${shifts.map(a=>`${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}`).join(", ")}` : "No shift scheduled"];
+  if(reqs.length) parts.push(reqs.map(r=>`${esc(reqLabel(r))} (${r.status})`).join(", "));
+  if(shifts.length && date<=todayISO()) parts.push(cen ? `Census sent (${cen.status})` : "Census not sent yet");
+  return `<p class="desc" style="margin:0 0 8px;font-weight:600;color:var(--ink)">${parts.join(" · ")}</p>`;
+}
+function employeeCalendarHTML(empId){
+  const [year, mon] = empMonthKey().split("-").map(Number);
+  const first = new Date(year, mon-1, 1);
+  const daysInMonth = new Date(year, mon, 0).getDate();
+  const monthLabel = first.toLocaleString('en-US',{month:'long',year:'numeric'});
+  const today = todayISO();
+  const selSet = new Set(empSelDates());
+  const shiftsByDate = {}, reqsByDate = {}, cenByDate = {};
+  state.assignments.filter(a=>a.nurseId===empId).forEach(a=>{ (shiftsByDate[a.date]=shiftsByDate[a.date]||[]).push(a); });
+  state.requests.filter(r=>r.nurseId===empId).forEach(r=>{ (reqsByDate[r.date]=reqsByDate[r.date]||[]).push(r); });
+  state.censusSubmissions.filter(c=>c.nurseId===empId).forEach(c=>{ cenByDate[c.date]=c; }); // latest submission per day
+  const cells = [];
+  for(let i=0;i<(first.getDay()+6)%7;i++) cells.push(`<div class="cal-cell empty-cell"></div>`);
+  for(let dt=1; dt<=daysInMonth; dt++){
+    const d = `${year}-${String(mon).padStart(2,'0')}-${String(dt).padStart(2,'0')}`;
+    const shifts = (shiftsByDate[d]||[]).sort((a,b)=>a.start-b.start);
+    const cls = ["cal-cell","selectable"];
+    if(d<today) cls.push("past");
+    if(d===today) cls.push("today");
+    if(selSet.has(d)) cls.push("sel");
+    const style = (isHoliday(d) && !selSet.has(d)) ? ' style="background:var(--gold-soft)"' : '';
+    const chips = shifts.map(a=>`<div class="cal-shift ${d<today?'done':''}">${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}</div>`).join("");
+    let tags = (reqsByDate[d]||[]).map(r=>`<span class="cal-tag ${statusClass(r.status)}" title="${esc(reqLabel(r))}: ${r.status}">${r.type==="PTO"?"PTO":r.type==="Off"?"OFF":"WANT"}</span>`).join("");
+    if(shifts.length && d<=today){
+      const c = cenByDate[d];
+      tags += c ? `<span class="cal-tag ${statusClass(c.status)}" title="Census ${c.status}">CEN</span>`
+                : `<span class="cal-tag due" title="You worked this day, census not sent yet">CEN?</span>`;
+    }
+    const dots = dayDotsHTML(d, shifts, reqsByDate[d], cenByDate[d], today);
+    cells.push(`<div class="${cls.join(" ")}"${style} onclick="empDayClick('${d}')"><div class="cal-daynum">${dt}</div><div class="cal-detail">${chips}${tags}</div>${dots}</div>`);
+  }
+  return `
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn secondary" onclick="shiftEmployeeMonth(-1)">← Prev</button>
+      <strong style="min-width:130px;text-align:center">${monthLabel}</strong>
+      <button class="btn secondary" onclick="shiftEmployeeMonth(1)">Next →</button>
+      <button class="btn secondary" onclick="jumpEmployeeToday()">Today</button>
+    </div>
+    <div class="cal-grid">${DAY_NAMES.map(d=>`<div class="cal-head">${d}</div>`).join("")}${cells.join("")}</div>
+    <div class="legend">
+      <span><span class="cal-shift" style="display:inline-block">7a–7p</span> scheduled</span>
+      <span><span class="cal-shift done" style="display:inline-block">7a–7p</span> past shift</span>
+      <span><span class="cal-tag pending">PTO</span><span class="cal-tag approved">OFF</span><span class="cal-tag denied">WANT</span> your requests: amber waiting, green approved, rust denied</span>
+      <span><span class="cal-tag due">CEN?</span> you worked, census not sent</span>
+      <span style="color:var(--ink-soft)">On a narrow screen, days show colored dots instead, tap any day for the full detail</span>
+    </div>`;
+}
+
+function employeeActionPanel(emp){
+  const dates = empSelDates();
+  const today = todayISO();
+  const wrap = inner => `<div class="inline-form" style="flex-direction:column;align-items:stretch;margin-top:12px">${inner}</div>`;
+  if(!dates.length){
+    return `<p class="desc" style="margin-top:12px">Tap a future day to ask for time off or a shift, and tap a second day to select a range. Tap a day you already worked to send in its patient census.</p>`;
+  }
+  const first = dates[0], last = dates[dates.length-1];
+  if(first <= today){
+    const summary = dayStatusSummaryHTML(emp.id, first);
+    const shifts = state.assignments.filter(a=>a.nurseId===emp.id && a.date===first).sort((a,b)=>a.start-b.start);
+    if(!shifts.length){
+      return summary + wrap(`<strong>${first}</strong><p class="desc" style="margin:4px 0 0">You weren't scheduled this day, so there's no census to send for it. On a wide screen, days you worked show a gold CEN? tag until you've sent one, on a phone that's the gold dot.</p><div class="row"><button class="btn secondary" onclick="clearEmpSel()">Close</button></div>`);
+    }
+    const shiftText = shifts.map(a=>`${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}`).join(", ");
+    const mine = state.censusSubmissions.filter(c=>c.nurseId===emp.id && c.date===first && c.status!=="rejected");
+    if(mine.length){
+      const c = mine[mine.length-1];
+      return summary + wrap(`<strong>Census for ${first}</strong>
+        <p class="desc" style="margin:4px 0 0">Your shift: ${shiftText}. You sent day ${c.day==null?"—":c.day} / night ${c.night==null?"—":c.night}, now <span class="pill ${statusClass(c.status)}">${c.status}</span>.${c.status==="pending" ? " To change it, withdraw it and send a new one." : ""}</p>
+        <div class="row">${c.status==="pending"?`<button class="btn secondary" onclick="withdrawCensus('${c.id}')">Withdraw</button>`:""}<button class="btn secondary" onclick="clearEmpSel()">Close</button></div>`);
+    }
+    const bands = bandsWorked(emp.id, first);
+    return summary + wrap(`
+      <strong>Census for ${first}</strong>
+      <p class="desc" style="margin:4px 0 0">Your shift: ${shiftText}. ${esc(state.censusPrompt)}</p>
+      <div class="row">
+        ${bands.day?`<div><label>Day census (7a–7p)</label><input type="number" min="0" id="cenDay" style="width:90px"></div>`:""}
+        ${bands.night?`<div><label>Night census (7p–7a)</label><input type="number" min="0" id="cenNight" style="width:90px"></div>`:""}
+        <div style="flex:1;min-width:180px"><label>Note (optional)</label><input type="text" id="cenNote" style="width:100%"></div>
+      </div>
+      <div class="row"><button class="btn" onclick="submitCensus()">Send to manager for review</button><button class="btn secondary" onclick="clearEmpSel()">Close</button></div>`);
+  }
+  const type = state.empReqType;
+  const rangeLabel = first===last ? first : `${first} to ${last} (${dates.length} days)`;
+  const scheduledDays = dates.filter(d=>state.assignments.some(a=>a.nurseId===emp.id && a.date===d)).length;
+  const summary = first===last ? dayStatusSummaryHTML(emp.id, first) : "";
+  const help = {
+    "PTO":"Paid time off. If approved, any shift you have on those days comes off the schedule.",
+    "Off":"You can't work those days. If approved, you won't be scheduled and any shift you have then comes off.",
+    "Desired shift":"Hours you'd like to work. Your manager sees it when building the schedule, approval doesn't put you on it automatically."
+  }[type];
+  return summary + wrap(`
+    <strong>${rangeLabel}</strong>
+    <div class="row">
+      <div><label>Request</label><select onchange="setEmpReqType(this.value)">${["PTO","Off","Desired shift"].map(t=>`<option ${t===type?"selected":""}>${t}</option>`).join("")}</select></div>
+      ${type==="Desired shift" ? `<div><label>Start</label><select id="empStart">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===emp.pref?"selected":""}>${fmtHour(h)}</option>`).join("")}</select></div><div><label>Hours</label><input type="number" id="empDur" value="12" min="1" max="16" style="width:60px"></div>` : ""}
+      <div style="flex:1;min-width:180px"><label>Note (optional)</label><input type="text" id="empNote" style="width:100%"></div>
+    </div>
+    <p class="desc" style="margin:0">${help}${scheduledDays && type!=="Desired shift" ? ` You're currently scheduled on ${scheduledDays} of these day${scheduledDays===1?"":"s"}.` : ""}</p>
+    <div class="row"><button class="btn" onclick="submitCalendarRequest()">Submit request${dates.length>1?"s":""}</button><button class="btn secondary" onclick="clearEmpSel()">Clear selection</button></div>`);
+}
+
+function submitCalendarRequest(){
+  const today = todayISO();
+  const future = empSelDates().filter(d=>d>today);
+  if(!future.length) return;
+  const type = state.empReqType;
+  const note = (document.getElementById("empNote")?.value || "").trim();
+  let start=null, duration=null;
+  if(type==="Desired shift"){
+    start = Number(document.getElementById("empStart").value);
+    duration = Math.min(16, Math.max(1, Number(document.getElementById("empDur").value)||12));
+  }
+  const fresh = future.filter(d=>!state.requests.some(r=>r.nurseId===state.employeeId && r.date===d && r.type===type && r.status!=="denied"));
+  const skipped = future.length - fresh.length;
+  if(!fresh.length){
+    flashMessage = `You already have a ${type} request for ${future.length===1?"that day":"those days"}. Withdraw it first if you want to change it.`;
+    render(); return;
+  }
+  snapshot();
+  fresh.forEach(d=>{
+    const req = {id:"r"+Math.random().toString(36).slice(2), nurseId:state.employeeId, date:d, type, status:"pending"};
+    if(note) req.note = note;
+    if(type==="Desired shift"){ req.start=start; req.duration=duration; }
+    state.requests.push(req);
+  });
+  state.empSel = {start:null,end:null,picking:false};
+  flashMessage = `Sent ${fresh.length} ${type} request${fresh.length===1?"":"s"} to your manager${skipped?` (${skipped} skipped, already requested)`:""}. Its status shows on your calendar.`;
+  render();
+}
+
+function submitCensus(){
+  const date = state.empSel.start, empId = state.employeeId;
+  if(!date || date>todayISO()) return;
+  if(!state.assignments.some(a=>a.nurseId===empId && a.date===date)){ flashMessage = "You weren't scheduled that day."; render(); return; }
+  const read = id => { const el=document.getElementById(id); if(!el || el.value==="") return null; const v=Number(el.value); return (isNaN(v) || v<0) ? NaN : v; };
+  const day = read("cenDay"), night = read("cenNight");
+  if(Number.isNaN(day) || Number.isNaN(night)){ flashMessage = "Census has to be a number, 0 or more."; render(); return; }
+  if(day==null && night==null){ flashMessage = "Enter at least one count before sending."; render(); return; }
+  const note = (document.getElementById("cenNote")?.value || "").trim();
+  snapshot();
+  state.censusSubmissions.push({id:"c"+Math.random().toString(36).slice(2), nurseId:empId, date, day, night, note, status:"pending"});
+  flashMessage = `Census for ${date} sent to your manager for review.`;
+  render();
+}
+function withdrawRequest(id){
+  const r = state.requests.find(x=>x.id===id);
+  if(!r || r.status!=="pending" || r.nurseId!==state.employeeId) return;
+  snapshot();
+  state.requests = state.requests.filter(x=>x.id!==id);
+  flashMessage = `Withdrew your ${r.type} request for ${r.date}.`;
+  render();
+}
+function withdrawCensus(id){
+  const c = state.censusSubmissions.find(x=>x.id===id);
+  if(!c || c.status!=="pending" || c.nurseId!==state.employeeId) return;
+  snapshot();
+  state.censusSubmissions = state.censusSubmissions.filter(x=>x.id!==id);
+  flashMessage = `Withdrew your census for ${c.date}.`;
+  render();
+}
+
+function employeePortal(){
+  if(!state.employeeId) state.employeeId = state.nurses[0].id;
+  const emp = nurse(state.employeeId) || state.nurses[0];
+  const nurseOpts = state.nurses.map(n=>`<option value="${n.id}" ${n.id===emp.id?'selected':''}>${esc(n.name)}</option>`).join("");
+
+  const weekShifts = state.assignments.filter(a=>a.nurseId===emp.id && DAYS.includes(a.date)).sort((a,b)=>a.date.localeCompare(b.date)||a.start-b.start);
+  const shiftRows = weekShifts.map(a=>`<tr><td>${a.date}</td><td>${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}</td></tr>`).join("")
+    || `<tr><td colspan="2" class="empty">No shifts scheduled this week.</td></tr>`;
+
+  const bd = scoreBreakdown(emp);
+  const total = bd.reduce((s,x)=>s+x.points,0);
+  const scored = state.nurses.filter(n=>n.role!=="Aide");
+  const unitAvg = scored.reduce((s,n)=>s+equityScore(n),0)/scored.length;
+  const bdRows = bd.map(x=>`<tr><td>${x.label}</td><td style="font-family:var(--mono)">${x.detail}</td><td style="font-family:var(--mono)">${x.points>=0?'+':''}${x.points.toFixed(1)}</td></tr>`).join("");
+  const scorePanel = emp.role==="Aide" ? `
+    <div class="panel">
+      <h2>Score</h2>
+      <p class="desc">Aides aren't scored under this system. It's built around who the unit assigns undesirable shifts to, and an aide picks their own hours, so that fairness question doesn't apply the same way here.</p>
+    </div>` : `
+    <div class="panel">
+      <h2>My score: ${total.toFixed(1)}</h2>
+      <p class="desc">Unit average right now is ${unitAvg.toFixed(1)}. ${total>unitAvg
+        ? "You're above average, meaning you've carried more of the unit's undesirable shifts or had more requests denied than most. That gives you standing for your next time-off request or to be skipped for the next unwanted pickup."
+        : "You're at or below the unit average right now."} Here's exactly how it's built, nothing hidden:</p>
+      <table><thead><tr><th>Factor</th><th>Calculation</th><th>Points</th></tr></thead><tbody>${bdRows}</tbody></table>
+      <p class="foot-note">Call-offs aren't part of this score. This measures how the unit has treated you, not your attendance record, the two are tracked separately on purpose.</p>
+    </div>`;
+
+  const myRequests = state.requests.filter(r=>r.nurseId===emp.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const reqRows = myRequests.map(r=>`<tr><td>${r.date}</td><td>${esc(reqLabel(r))}</td><td>${r.note?esc(r.note):""}</td><td><span class="pill ${r.status}">${r.status}</span></td><td>${r.status==="pending"?`<button class="icon-btn" onclick="withdrawRequest('${r.id}')">withdraw</button>`:""}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="empty">No requests yet. Tap a future day on the calendar to make one.</td></tr>`;
+  const myCensus = state.censusSubmissions.filter(c=>c.nurseId===emp.id).sort((a,b)=>b.date.localeCompare(a.date));
+  const cenRows = myCensus.map(c=>`<tr><td>${c.date}</td><td>${c.day==null?"—":c.day}</td><td>${c.night==null?"—":c.night}</td><td>${c.note?esc(c.note):""}</td><td><span class="pill ${statusClass(c.status)}">${c.status}</span></td><td>${c.status==="pending"?`<button class="icon-btn" onclick="withdrawCensus('${c.id}')">withdraw</button>`:""}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">Nothing sent yet. Tap a day you worked on the calendar to send its census.</td></tr>`;
+
+  return `
+    ${flashMessage ? `<div class="flag warn block">${flashMessage}</div>` : ""}
+    <div class="panel">
+      <h2>Viewing as</h2>
+      <select onchange="state.employeeId=this.value; state.empSel={start:null,end:null,picking:false}; flashMessage=''; render()">${nurseOpts}</select>
+      <p class="desc" style="margin-top:8px">In a real system this would just be the logged-in nurse's own account. This selector exists only so you can preview any nurse's view in this demo. A real portal would not let one nurse see another nurse's individual score, only their own next to the unit average, which is what's shown below.</p>
+    </div>
+    <div class="panel">
+      <h2>My schedule</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn ${state.employeeView==='week'?'':'secondary'}" onclick="setEmployeeView('week')">Week</button>
+        <button class="btn ${state.employeeView==='month'?'':'secondary'}" onclick="setEmployeeView('month')">Month</button>
+      </div>
+      ${state.employeeView==='week'
+        ? `${weekNavControlHTML()}<table><thead><tr><th>Date</th><th>Shift</th></tr></thead><tbody>${shiftRows}</tbody></table>
+           <p class="foot-note">Requests and census are sent from the Month view, tap days on the calendar.</p>`
+        : employeeCalendarHTML(emp.id) + employeeActionPanel(emp)}
+    </div>
+    <div class="panel">
+      <h2>My requests</h2>
+      <div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Request</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${reqRows}</tbody></table></div>
+    </div>
+    <div class="panel">
+      <h2>My census submissions</h2>
+      <div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Day</th><th>Night</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>${cenRows}</tbody></table></div>
+    </div>
+    ${scorePanel}`;
+}
+
+render();
+initPersistence();
+document.addEventListener("keydown", e=>{
+  if(e.key!=="Escape") return;
+  if(selDate!==null){
+    selDate=null; selStart=null; selEnd=null; pickingRange=false;
+    const he = document.getElementById("hourEditor"); if(he) he.innerHTML="";
+    render();
+    return;
+  }
+  const asf = document.getElementById("addShiftForm");
+  if(asf && asf.innerHTML.trim()) asf.innerHTML="";
+});
+</script>
+</body>
+</html>
