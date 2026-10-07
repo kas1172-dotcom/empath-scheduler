@@ -486,6 +486,26 @@ function nursePrefs(n){
   if(Array.isArray(n.prefs)) return n.prefs;
   return n.pref!=null ? [n.pref] : [];
 }
+// shiftType is a HARD constraint ("day" or "night"), unlike prefs (soft start-time preference)
+// and unlike everything else in Roster, which only ever feeds the auto-fill ranking — this one
+// actually removes a nurse from eligibility for the other band's gaps. "any" (the default) behaves
+// exactly like before this existed.
+function nurseShiftType(n){ return n.shiftType==="day" || n.shiftType==="night" ? n.shiftType : "any"; }
+// The start hour this nurse has actually worked most often in the last 4 real weeks (before the
+// week being planned). Used as a soft tiebreak so auto-fill leans toward keeping someone's actual
+// week-to-week pattern consistent once enough shift history exists, rather than only matching their
+// stated preference fresh each time. Returns null with no history yet (a new roster has none).
+function typicalStartHour(nurseId){
+  const since = addDays(DAYS[0], -28);
+  const counts = {};
+  state.assignments.forEach(a=>{
+    if(a.nurseId!==nurseId || a.date<since || a.date>=DAYS[0]) return;
+    counts[a.start] = (counts[a.start]||0)+1;
+  });
+  let best=null, bestN=0;
+  Object.entries(counts).forEach(([h,n])=>{ if(n>bestN){ bestN=n; best=Number(h); } });
+  return best;
+}
 function isWeekend(iso){ const day = new Date(iso+"T00:00:00").getDay(); return day===0 || day===6; }
 function isHoliday(iso){ return state.holidays.includes(iso); }
 
@@ -735,8 +755,8 @@ function coverageTab(){
       <ul class="desc" style="margin:0 0 10px 18px;padding:0;list-style:disc;">
         <li>Checks every hour of each day/night band, not just the start, so a shorter shift that leaves a gap partway through still gets caught.</li>
         <li>Closes one gap at a time with a standard-length shift (8h if the gap is narrow, 12h if it spans more of the band) sized and placed to cover just that gap, instead of always stacking a full 12-hour shift from the band's start, which used to overstaff the band's easier hours.</li>
-        <li>Only considers nurses who are free: not already on shift, not on approved PTO, rest-compliant (10+ hours since their last shift), and under a hard 60-hour weekly cap (only crossed if every eligible option for that specific gap is already past it, so a gap never goes unfilled over it, flagged in the summary when it happens).</li>
-        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); then fewest hours already scheduled this week, the main lever for actually leveling out the load instead of the same well-matched few climbing into OT while others sit at zero; then, for a night-band gap, fewest nights already carried (year-to-date plus this run), to rotate who takes nights rather than leaving it to chance; then shift-time preference match; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
+        <li>Only considers nurses who are free: not already on shift, not on approved PTO, rest-compliant (10+ hours since their last shift), under a hard 60-hour weekly cap (only crossed if every eligible option for that specific gap is already past it, so a gap never goes unfilled over it, flagged in the summary when it happens), and not locked out of this band by a hard "Day only" / "Night only" shift-type setting in Roster (a day-only nurse is never even considered for a night gap, full stop, not just deprioritized).</li>
+        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); then fewest hours already scheduled this week relative to their own FTE (a 0.5 FTE nurse at 20hrs ranks as "full" right alongside a 1.0 FTE nurse at 40hrs), the main lever for actually leveling out the load instead of the same well-matched few climbing into OT while others sit idle; then, for a night-band gap, fewest nights already carried (year-to-date plus this run), to rotate who takes nights rather than leaving it to chance; then whether this gap's actual start time matches a pattern they've actually worked in the last 4 weeks, to keep an individual's week-to-week schedule predictable once there's real history to go on; then whether it matches one of their stated preferred start times in Roster; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
         <li>Swaps in a certified nurse for the gap it's filling if no one already covering that window is certified.</li>
       </ul>
       <div class="row">
@@ -950,6 +970,8 @@ function runAutoFill(){
 
       let eligible = state.nurses.filter(n=>{
         if(n.role==="Aide") return false; // aides self-schedule, auto-fill doesn't touch their coverage
+        const st = nurseShiftType(n);
+        if(st!=="any" && st!==b.label) return false; // hard day-only / night-only lock
         if(approvedPTO(n.id, startCell.date)) return false;
         if(restViolation(n.id, startCell.date, startCell.hour, span)) return false; // also catches overlap with an existing shift
         return true;
@@ -982,7 +1004,17 @@ function runAutoFill(){
           const nightsA = (a.nightsYTD||0)+(nightsThisRun[a.id]||0), nightsC = (c.nightsYTD||0)+(nightsThisRun[c.id]||0);
           if(nightsA!==nightsC) return nightsA-nightsC;
         }
-        const prefA = nursePrefs(a).some(p=>Math.abs(p-b.start)<=2) ? 0:1, prefC = nursePrefs(c).some(p=>Math.abs(p-b.start)<=2) ? 0:1;
+        // Before stated preference, favor whoever's own recent actual pattern already matches this
+        // start time — keeps week-to-week schedules predictable for staff once enough shift history
+        // exists to have a pattern, rather than treating every week as a fresh blank slate.
+        // Both this and the preference match below compare against startCell.hour, the actual
+        // computed start of THIS gap (e.g. 1p for an 8h gap inside the day band), not b.start, the
+        // band's fixed 7a/7p anchor — comparing to the band anchor meant a mid-day preference (9a,
+        // 11a, 1p) could never win a tiebreak no matter how good a match it was for this specific gap.
+        const typA = typicalStartHour(a.id), typC = typicalStartHour(c.id);
+        const consistA = typA!=null && Math.abs(typA-startCell.hour)<=2 ? 0:1, consistC = typC!=null && Math.abs(typC-startCell.hour)<=2 ? 0:1;
+        if(consistA!==consistC) return consistA-consistC;
+        const prefA = nursePrefs(a).some(p=>Math.abs(p-startCell.hour)<=2) ? 0:1, prefC = nursePrefs(c).some(p=>Math.abs(p-startCell.hour)<=2) ? 0:1;
         if(prefA!==prefC) return prefA-prefC;
         return equityScore(a)-equityScore(c);
       });
@@ -1389,7 +1421,7 @@ function buildChatContext(){
     weekStart: state.weekStart, weekLabel: weekLabel(),
     requirement: state.requirement, otThreshold: state.otThreshold, ratioTarget: state.ratioTarget,
     holidays: state.holidays,
-    nurses: state.nurses.map(n=>({ name:n.name, role:n.role, fte:n.fte, cert:n.cert, preferredStarts:nursePrefs(n).map(fmtHour), nightsYTD:n.nightsYTD, weekendsYTD:n.weekendsYTD, holidaysYTD:n.holidaysYTD, hoursThisWeek:weeklyHoursFor(n.id) })),
+    nurses: state.nurses.map(n=>({ name:n.name, role:n.role, fte:n.fte, cert:n.cert, shiftType:nurseShiftType(n), preferredStarts:nursePrefs(n).map(fmtHour), nightsYTD:n.nightsYTD, weekendsYTD:n.weekendsYTD, holidaysYTD:n.holidaysYTD, hoursThisWeek:weeklyHoursFor(n.id) })),
     thisWeekShifts: DAYS.flatMap(d=>state.assignments.filter(a=>a.date===d).map(a=>({ nurse:nurse(a.nurseId)?.name||"?", date:d, start:fmtHour(a.start), end:fmtHour((a.start+a.duration)%24), hours:a.duration }))),
     pendingRequests: state.requests.filter(r=>r.status==="pending").map(r=>({ nurse:nurse(r.nurseId)?.name||"?", date:r.date, type:r.type })),
     approvedTimeOffThisWeek: state.requests.filter(r=>r.status==="approved" && (r.type==="PTO"||r.type==="Off") && DAYS.includes(r.date)).map(r=>({ nurse:nurse(r.nurseId)?.name||"?", date:r.date, type:r.type })),
@@ -1791,7 +1823,12 @@ function rosterTab(){
       <td><select onchange="updateNurse('${n.id}','role',this.value)">${["RN","MHRN","Manager","Aide","Other"].map(r=>`<option ${n.role===r?'selected':''}>${r}</option>`).join("")}</select></td>
       <td><input type="number" step="0.1" min="0" max="1" value="${n.fte}" style="width:60px" onchange="updateNurse('${n.id}','fte',Number(this.value))"></td>
       <td><input type="checkbox" ${n.cert?'checked':''} onchange="updateNurse('${n.id}','cert',this.checked)"></td>
-      <td><div style="display:flex;flex-wrap:wrap;gap:4px;max-width:170px">${[7,9,11,19,21,23].map(h=>`<label style="font-size:11px;display:inline-flex;align-items:center;gap:2px;border:1px solid var(--border);border-radius:4px;padding:1px 5px;cursor:pointer;white-space:nowrap"><input type="checkbox" style="margin:0" ${nursePrefs(n).includes(h)?'checked':''} onchange="toggleNursePref('${n.id}',${h})">${fmtHour(h)}</label>`).join("")}</div></td>
+      <td><select onchange="updateNurse('${n.id}','shiftType',this.value)" title="Hard lock — excludes this nurse from the other band entirely in auto-fill">
+        <option value="any" ${nurseShiftType(n)==='any'?'selected':''}>Any</option>
+        <option value="day" ${nurseShiftType(n)==='day'?'selected':''}>Day only</option>
+        <option value="night" ${nurseShiftType(n)==='night'?'selected':''}>Night only</option>
+      </select></td>
+      <td><div style="display:flex;flex-wrap:wrap;gap:4px;max-width:200px">${[7,9,11,13,19,21,23].map(h=>`<label style="font-size:11px;display:inline-flex;align-items:center;gap:2px;border:1px solid var(--border);border-radius:4px;padding:1px 5px;cursor:pointer;white-space:nowrap"><input type="checkbox" style="margin:0" ${nursePrefs(n).includes(h)?'checked':''} onchange="toggleNursePref('${n.id}',${h})">${fmtHour(h)}</label>`).join("")}</div></td>
       <td>${weeklyHoursFor(n.id)} hrs</td>
       <td>${confirmingRemoveId===n.id
         ? `<button class="btn danger" style="padding:3px 7px;font-size:11px" onclick="confirmRemoveYes('${n.id}')">Confirm</button> <button class="btn secondary" style="padding:3px 7px;font-size:11px" onclick="confirmRemoveNo()">Cancel</button>`
@@ -1800,9 +1837,9 @@ function rosterTab(){
   return `
     <div class="panel">
       <h2>Roster</h2>
-      <p class="desc">Cert = crisis-intervention certified. Preferred start feeds the auto-fill engine for RNs and Managers, but never locks the manual schedule, you can override any assignment directly. Aides are excluded from auto-fill entirely, since they self-schedule, their preferred start here is just a note for you.</p>
+      <p class="desc">Cert = crisis-intervention certified. "Shift type" is a hard lock, day-only/night-only nurses are never even considered for the other band in auto-fill. Preferred start is a soft signal, a tiebreak the auto-fill engine weighs, not a lock. Neither one ever blocks the manual schedule, you can override any assignment directly. Aides are excluded from auto-fill entirely, since they self-schedule, these fields are just notes for you on their row.</p>
       <div style="overflow-x:auto;">
-      <table><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Cert</th><th>Preferred start</th><th>Hrs this wk</th><th></th></tr></thead>
+      <table><thead><tr><th>Name</th><th>Role</th><th>FTE</th><th>Cert</th><th>Shift type</th><th>Preferred start</th><th>Hrs this wk</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table>
       </div>
       <div class="row" style="margin-top:12px;"><button class="btn secondary" onclick="addNurse()">+ Add nurse</button></div>
@@ -1825,7 +1862,7 @@ function confirmRemoveNo(){ confirmingRemoveId=null; render(); }
 function addNurse(){
   snapshot();
   const id="n"+Math.random().toString(36).slice(2);
-  state.nurses.push({id,name:"New nurse",role:"RN",fte:1.0,cert:false,prefs:[7],nightsYTD:0,weekendsYTD:0,holidaysYTD:0,calloffs:0,ptoHonored:0,ptoDenied:0,prefHonored:0,prefDenied:0});
+  state.nurses.push({id,name:"New nurse",role:"RN",fte:1.0,cert:false,shiftType:"any",prefs:[7],nightsYTD:0,weekendsYTD:0,holidaysYTD:0,calloffs:0,ptoHonored:0,ptoDenied:0,prefHonored:0,prefDenied:0});
   render();
 }
 
