@@ -1,0 +1,16 @@
+{
+  "name": "empath-scheduler-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal backend for the EMPATH Unit Nurse Scheduler: serves index.html and persists app state to a file on a Fly Volume.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

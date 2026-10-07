@@ -13,17 +13,24 @@ Export). Works from disk, from GitHub Pages, or published as a Claude artifact.
 
 ## Persistence — read this before relying on it
 
+Three tiers, picked automatically at load, in this order:
+
+- **Deployed to its own backend (Fly.io, see below)**: real server-side persistence in
+  a file on a Fly Volume, independent of any one browser, synced across every device
+  that opens the URL (polls for changes every 5s). This is the tier you want for actual
+  multi-device, multi-person use. Still no transactions: two saves in the same instant,
+  the second wins entirely, not just the fields that collided — fine for a manager plus
+  a handful of staff, not fine at real scale.
 - **Inside Claude's own viewer**, this saves to a real shared document (the `db`
-  capability) and syncs live between everyone who has it open. It has no transactions:
-  if two people save in the same instant, the second write wins entirely, not just on
-  the fields that actually collided. Fine for a manager plus a handful of staff saving
-  occasionally; not fine at real multi-user scale.
-- **Anywhere else** (GitHub Pages, opened straight from disk), it falls back to this
-  browser's own `localStorage`. Your data survives a refresh and follows you between
-  tabs of the *same* browser, but does not sync to anyone else and does not follow you
-  to a different device.
-- A status indicator next to Undo always says which of these is happening: Saved,
-  Saving…, or a visible error. It never fails silently.
+  capability) and syncs live between everyone who has it open. Same no-transactions
+  caveat as above.
+- **Anywhere else** (GitHub Pages, opened straight from disk, with no backend
+  reachable), it falls back to this browser's own `localStorage`. Your data survives a
+  refresh and follows you between tabs of the *same* browser, but does not sync to
+  anyone else and does not follow you to a different device.
+
+A status indicator next to Undo always says which of these is active and whether it's
+Saved, Saving…, or erroring. It never fails silently.
 - **There is no real sign-in yet.** The "Employee portal" is a dropdown that lets
   anyone preview any nurse's view from the same browser tab. It is not access control.
   Anyone who can open the page can open the Manager view, the Roster, wages, everyone's
@@ -58,6 +65,11 @@ Export). Works from disk, from GitHub Pages, or published as a Claude artifact.
 - Import census/FTE from a spreadsheet (`.xlsx`/`.csv`), loosely-matched columns
 - Import past shifts from a spreadsheet, matched against your Roster by name, safe to
   re-run (skips exact duplicates, reports what it skipped and why)
+- Import past shifts from a **photo** of a schedule (printed or handwritten) — needs
+  the Fly.io backend deployed with an `ANTHROPIC_API_KEY` secret set (see below), since
+  reading a photo takes a vision-model call a static page can't make on its own. Shows
+  you a preview of everything it read, matched and ready to confirm, before anything
+  touches the schedule.
 - Export the current week's shifts to `.xlsx`
 - Print: grid, daily list, or a census/FTE history report, portrait or landscape
 
@@ -70,15 +82,60 @@ Export). Works from disk, from GitHub Pages, or published as a Claude artifact.
   than one period
 - Labor cost tracking with real wage/differential/overtime math
 
+## Deploying your own copy to Fly.io
+
+This runs the same `index.html` behind a small Node/Express server (`server.js`) that
+persists state to a file on a Fly Volume, so it's no longer tied to one browser or one
+device. Total cost at the settings below is under $4/month — a `shared-cpu-1x` machine
+at 512MB RAM (~$3.69/mo) plus a 1GB Volume (~$0.15/mo). No managed database needed.
+
+**One-time setup**, from a terminal with [`flyctl`](https://fly.io/docs/flyctl/install/)
+installed and `fly auth login` already run:
+
+```sh
+cd empath-scheduler
+fly launch --no-deploy   # picks a unique app name if "empath-scheduler" is taken;
+                          # when it asks, say no to Postgres/Redis — the app doesn't need them
+fly volumes create empath_data --region iad --size 1   # 1GB volume for the SQLite-free JSON store
+fly deploy
+```
+
+`fly launch` will offer to create/overwrite `fly.toml` — the one already in this repo
+already has the right machine size (`shared-cpu-1x`, 512MB), the volume mount, and
+`auto_stop_machines` turned on so you're billed only while it's actually serving a
+request. If `fly launch` regenerates it differently, just restore the settings above
+before running `fly deploy`.
+
+**To turn on photo-based schedule import** (optional): get your own API key from
+[console.anthropic.com](https://console.anthropic.com), then:
+
+```sh
+fly secrets set ANTHROPIC_API_KEY=sk-ant-...
+```
+
+That's it — no redeploy needed, Fly restarts the machine with the new secret
+automatically. Until you set this, the photo-import panel stays visibly disabled with
+an explanation, and every other feature works normally without it.
+
+**After deploying**, open the app at `https://<your-app-name>.fly.dev` instead of the
+GitHub Pages copy or the Claude artifact — that's the one with real, synced, multi-
+device persistence. The GitHub Pages copy and the Claude artifact keep working exactly
+as before (falling back to localStorage / the `db` capability respectively); nothing
+about deploying this changes them.
+
 ## Known gaps, in priority order
 
 1. **No real accounts or access control.** Anyone with the link sees everything.
-2. **Persistence has no transactions** on the Claude-hosted path, and no cross-device
-   sync at all on the localStorage-fallback path.
-3. **No daily/weekly automated backup export** — if the store is ever lost, so is the
-   history.
+2. **Persistence has no transactions** on any path (server, Claude-hosted, or
+   localStorage) — two saves in the same instant, the second wins entirely, not just
+   the fields that collided.
+3. **No daily/weekly automated backup export** — if the Fly Volume (or the Claude `db`
+   document, or the browser's localStorage) is ever lost, so is the history.
+4. **Photo import's accuracy depends on the photo.** A vision model can misread a name
+   or a time, which is why it always shows a preview to confirm before anything is
+   added to the schedule — but it's still only as good as what it was asked to read.
 
-The natural next step, once this is used enough that these matter, is a real backend
-(e.g. Supabase) with actual sign-in and row-level access rules — that removes both the
-account-boundary problem and the transaction problem in one move, but it's a genuine
-rebuild of the data layer, not a small patch on top of this file.
+The natural next step, once this is used enough that these matter, is real sign-in and
+row-level access rules on top of the Fly.io backend — that removes the account-boundary
+problem and the transaction problem in one move, but it's a genuine extension of the
+server, not a small patch.

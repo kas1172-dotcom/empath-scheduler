@@ -98,7 +98,9 @@
     body{ background:#fff; color:#000; }
     main{ padding:0; max-width:none; }
     #printArea{ border:none !important; box-shadow:none !important; background:#fff !important; padding:0 !important; margin:0 !important; }
+    .print-scroll{ overflow:visible !important; }
   }
+  .print-scroll{ overflow-x:auto; }
 
   table{ width:100%; border-collapse:collapse; font-size:12.5px; }
   th{ text-align:left; color:var(--ink-soft); font-weight:600; font-size:11px; padding:6px 8px; border-bottom:1px solid var(--border); }
@@ -330,9 +332,10 @@ function renderUndoControl(){
    tabs of the same browser, via the native 'storage' event, wired in below. */
 const LS_KEY = "empath-scheduler-state-v1";
 let dbDoc = null, dbUnsub = null;
-let persistMode = "none"; // "cloud" | "local" | "none" — decided once at boot, in initPersistence
+let persistMode = "none"; // "server" | "cloud" | "local" | "none" — decided once at boot, in initPersistence
 let syncState = "loading"; // loading | saved | saving | dirty | unavailable | error
 let dirty = false, saving = false, saveTimer = null;
+let serverUpdatedAt = 0, serverPollTimer = null; // "server" mode only: last-seen write timestamp + polling handle
 function renderSyncStatus(){
   const el = document.getElementById("syncStatus");
   if(!el) return;
@@ -365,7 +368,16 @@ async function doSave(){
   saving = true; dirty = false;
   syncState = "saving"; renderSyncStatus();
   try{
-    if(persistMode==="cloud"){
+    if(persistMode==="server"){
+      const res = await fetch("/api/state", {
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ data: dataFields() }),
+      });
+      if(!res.ok) throw new Error("save failed: "+res.status);
+      const body = await res.json();
+      serverUpdatedAt = body.updatedAt;
+    } else if(persistMode==="cloud"){
       await dbDoc.set(dataFields());
     } else {
       localStorage.setItem(LS_KEY, JSON.stringify(dataFields()));
@@ -387,6 +399,24 @@ function applyLoadedData(data){
   Object.keys(dataFields()).forEach(k=>{ if(data[k]!==undefined) state[k] = data[k]; });
 }
 async function initPersistence(){
+  // Path 0: this copy of the page is being served by its own backend (the Fly.io deployment, if
+  // you've set one up) — real server-side persistence in a database file, independent of any one
+  // browser, and synced across every device that opens this URL. A static copy of this same file
+  // (GitHub Pages, opened from disk, the Claude artifact viewer) has no /api/state to answer this,
+  // so the fetch below either 404s or errors out and we fall through to the other paths below.
+  try{
+    const probe = await fetch("/api/state", { headers:{ Accept:"application/json" } });
+    if(probe.ok){
+      const body = await probe.json();
+      persistMode = "server";
+      if(body && body.data){ applyLoadedData(body.data); flashMessage = "Loaded your saved data."; }
+      serverUpdatedAt = (body && body.updatedAt) || 0;
+      syncState = "saved";
+      render();
+      serverPollTimer = setInterval(pollServerState, 5000);
+      return;
+    }
+  } catch(e){ /* no backend here — not an error, just means this isn't the Fly-hosted copy */ }
   // Path 1: the db capability, only real inside Claude's viewer, and syncs across everyone with the page open.
   if(typeof claude!=="undefined"){
     let db;
@@ -427,6 +457,22 @@ async function initPersistence(){
     syncState = "unavailable";
   }
   render();
+}
+// "server" mode only: short-polls for changes written by someone else (another device, another
+// tab). Skips a tick while a local save is in flight or pending, so it never clobbers an edit
+// that just hasn't reached the server yet — exactly the same "ignore our own unconfirmed write"
+// guard the "cloud" path gets for free from onSnapshot.
+async function pollServerState(){
+  if(saving || dirty) return;
+  try{
+    const res = await fetch("/api/state", { headers:{ Accept:"application/json" } });
+    if(!res.ok) return;
+    const body = await res.json();
+    if(body && body.updatedAt && body.updatedAt > serverUpdatedAt){
+      serverUpdatedAt = body.updatedAt;
+      if(body.data){ applyLoadedData(body.data); render(); }
+    }
+  } catch(e){ /* a dropped poll just tries again in 5s */ }
 }
 
 /* ============ HELPERS ============ */
@@ -545,6 +591,7 @@ function render(){
   renderStats();
   renderNav();
   renderMain();
+  renderImageImportPreview();
 }
 function shiftWeek(n){ state.weekStart = addDays(state.weekStart, 7*n); render(); }
 function weekLabel(){
@@ -662,6 +709,7 @@ function coverageTab(){
     <div class="panel">
       <h2>Editable weekly schedule</h2>
       <p class="desc">Every nurse can have a fully custom start time and shift length, nothing is locked to a fixed 7-7 or 9-9 block unless you set it that way. A rust "OT" tag means this nurse is scheduled past ${state.otThreshold} hours this week, federal overtime territory under FLSA, at 1.5x pay on the excess. Adding a shift never blocks on this, it's a flag for you to weigh, not a hard rule.</p>
+      ${weekNavControlHTML()}
       <div style="overflow-x:auto;">
         <table><thead><tr><th>Nurse</th>${DAY_NAMES.map((d,i)=>`<th>${d} ${DAYS[i].slice(5)}</th>`).join("")}</tr></thead>
         <tbody>${scheduleRows}</tbody></table>
@@ -933,21 +981,22 @@ function censusTab(){
   return `
     ${flashMessage ? `<div class="flag warn block">${flashMessage}</div>` : ""}
     <div class="panel">
-      <h2>Set your target ratio and track census</h2>
+      <h2>Manager census entry</h2>
+      <p class="desc">Enter patient census directly here, day and night, for any week — type a number and it saves immediately, no approval step. Use the navigator to reach past or future weeks. This is separate from the staff-submitted census in Requests, which still needs manager review before it counts.</p>
       ${weekNavControlHTML()}
       <div class="row">
         <div><label>Target ratio (nurse : patients)</label>
           <div class="row" style="gap:4px">1 : <input type="number" min="1" step="0.5" value="${state.ratioTarget}" style="width:60px" onchange="setRatioTarget(this.value)"></div>
         </div>
       </div>
-      <table style="margin-top:10px"><thead><tr><th>Day</th><th>Day census</th><th>Actual staff on</th><th>Night census</th><th>Actual staff on</th></tr></thead>
-      <tbody>${rows}</tbody></table>
+      <div style="overflow-x:auto;"><table style="margin-top:10px"><thead><tr><th>Day</th><th>Day census</th><th>Actual staff on</th><th>Night census</th><th>Actual staff on</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
       <div class="row" style="margin-top:14px; gap:26px">
         <div class="stat"><div class="n">${availFTE.toFixed(1)}</div><div class="l">Available FTE (roster)</div></div>
         <div class="stat"><div class="n">${reqFTE.toFixed(1)}</div><div class="l">FTE from Coverage requirement (your policy floor)</div></div>
         <div class="stat ${censusFTE>availFTE?'warn':'ok'}"><div class="n">${censusFTE.toFixed(1)}</div><div class="l">FTE the recorded census would have needed</div></div>
       </div>
-      <p class="foot-note">"Actual staff on" is the real average headcount scheduled during that band, computed from your actual assignments, not a formula guess. Put next to the census you record, this is the evidence: if census was consistently high while actual staff stayed flat, that's the argument for more FTE, made with your own real numbers instead of a hypothetical. Census numbers here are placeholders until you replace them with your actual counts.</p>
+      <p class="foot-note">"Actual staff on" is the real average headcount scheduled during that band, computed from your actual assignments, not a formula guess. Put next to the census you record, this is the evidence: if census was consistently high while actual staff stayed flat, that's the argument for more FTE, made with your own real numbers instead of a hypothetical.</p>
     </div>
 
     <div class="panel">
@@ -965,6 +1014,15 @@ function censusTab(){
         <input type="file" accept=".xlsx,.xls,.csv" onchange="handleScheduleUpload(this)">
       </div>
       <p class="foot-note">Skips a row rather than guessing when the nurse name doesn't match anyone on your Roster, or the date/time can't be read, and tells you afterward what it skipped and why, rather than silently dropping rows.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Import past shifts from a photo</h2>
+      <p class="desc">Take or upload a photo of a printed or handwritten schedule and this reads it with a vision model, the same way the spreadsheet import above works but for a picture instead of a file. ${persistMode==='server' ? 'The photo is sent to this app\'s own server, which calls the model and never stores the image itself.' : 'This needs the Fly.io-hosted version of this app, since reading a photo requires a server-side model call that a plain static copy can\'t make. '+(persistMode==='cloud'?'Not available in this demo viewer.':'Deploy the server (see the README) to turn this on.')}</p>
+      <div class="row">
+        <input type="file" accept="image/*" capture="environment" ${persistMode!=='server'?'disabled':''} onchange="handleScheduleImageUpload(this)">
+      </div>
+      <div id="imageImportResult" style="margin-top:8px"></div>
     </div>
 
     <div class="panel">
@@ -1108,6 +1166,110 @@ async function handleScheduleUpload(input){
   };
   reader.readAsArrayBuffer(file);
 }
+/* ---- image import: photo of a schedule -> structured shifts, via the server's vision call ---- */
+let pendingImageImport = null; // {candidates:[{nurseId,nurseName,date,start,duration}], notes:[string]}
+function downscaleImageToJPEGBase64(file, maxDim=1600, quality=0.82){
+  return new Promise((resolve,reject)=>{
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = ()=>{
+      let {width,height} = img;
+      if(width>maxDim || height>maxDim){
+        const scale = maxDim/Math.max(width,height);
+        width = Math.round(width*scale); height = Math.round(height*scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img,0,0,width,height);
+      URL.revokeObjectURL(url);
+      const dataUrl = canvas.toDataURL("image/jpeg", quality);
+      resolve(dataUrl.split(",")[1]);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error("couldn't read that image file")); };
+    img.src = url;
+  });
+}
+async function handleScheduleImageUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  flashMessage = "Reading photo and matching it against your roster, this can take a few seconds…";
+  pendingImageImport = null;
+  render();
+  try{
+    const imageBase64 = await downscaleImageToJPEGBase64(file);
+    const res = await fetch("/api/parse-schedule-image", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ imageBase64, mediaType:"image/jpeg" }),
+    });
+    const body = await res.json();
+    if(!res.ok){ flashMessage = body.error || "Couldn't read that photo."; input.value=""; render(); return; }
+    const shifts = Array.isArray(body.shifts) ? body.shifts : [];
+    if(!shifts.length){ flashMessage = "Didn't find any readable shifts in that photo. Try a clearer or better-lit photo."; input.value=""; render(); return; }
+    const candidates = [], notes = [];
+    const unmatchedNames = new Set(), badDates = [], badTimes = [];
+    shifts.forEach((s,i)=>{
+      if(!s || !s.date || !s.nurse){ return; }
+      const d = new Date(s.date+"T00:00:00");
+      if(isNaN(d)){ badDates.push(`#${i+1} (${s.date})`); return; }
+      const iso = isoLocal(d);
+      const name = String(s.nurse).trim().toLowerCase();
+      const n = state.nurses.find(x=>x.name.trim().toLowerCase()===name)
+        || state.nurses.find(x=>x.name.trim().toLowerCase().includes(name) || name.includes(x.name.trim().toLowerCase()));
+      if(!n){ unmatchedNames.add(String(s.nurse).trim()); return; }
+      const start = parseHourLabel(s.start);
+      if(start==null){ badTimes.push(`${s.nurse} on ${iso}`); return; }
+      let duration = 12; // sane default when the model couldn't read an end time
+      if(s.end){ const end = parseHourLabel(s.end); if(end!=null) duration = ((end-start+24)%24) || 24; }
+      const already = state.assignments.some(a=>a.nurseId===n.id && a.date===iso && a.start===start && a.duration===duration);
+      candidates.push({ nurseId:n.id, nurseName:n.name, date:iso, start, duration, duplicate:already });
+    });
+    if(unmatchedNames.size) notes.push(`${unmatchedNames.size} name${unmatchedNames.size===1?"":"s"} not found in Roster: ${[...unmatchedNames].join(", ")}`);
+    if(badDates.length) notes.push(`${badDates.length} shift(s) with an unreadable date`);
+    if(badTimes.length) notes.push(`${badTimes.length} shift(s) with an unreadable start time`);
+    if(!candidates.length){ flashMessage = `Read the photo but couldn't match any shifts to your roster.${notes.length?" "+notes.join("; ")+".":""}`; input.value=""; render(); return; }
+    pendingImageImport = { candidates, notes };
+    flashMessage = "";
+    input.value = "";
+    render();
+  } catch(err){
+    flashMessage = `Couldn't read that photo (${err.message}).`;
+    input.value = "";
+    render();
+  }
+}
+function renderImageImportPreview(){
+  const el = document.getElementById("imageImportResult");
+  if(!el) return;
+  if(!pendingImageImport){ el.innerHTML = ""; return; }
+  const { candidates, notes } = pendingImageImport;
+  const toAdd = candidates.filter(c=>!c.duplicate);
+  const dupeCount = candidates.length - toAdd.length;
+  const rows = candidates.map(c=>`<tr${c.duplicate?' style="opacity:.5"':''}>
+    <td>${c.date}</td><td>${esc(c.nurseName)}</td><td>${fmtHour(c.start)}–${fmtHour((c.start+c.duration)%24)}</td>
+    <td>${c.duplicate?'<span class="pill" style="background:var(--border-soft);color:var(--ink-soft)">already scheduled</span>':'<span class="pill" style="background:var(--green-soft);color:var(--green)">new</span>'}</td>
+  </tr>`).join("");
+  el.innerHTML = `
+    <div class="flag warn block">Read ${candidates.length} shift${candidates.length===1?"":"s"} from the photo, ${toAdd.length} new, ${dupeCount} already on the schedule. Check this against the actual photo before confirming, a vision model can still misread a name or a time.${notes.length?" "+notes.join("; ")+".":""}</div>
+    <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Date</th><th>Nurse</th><th>Shift</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" ${toAdd.length?'':'disabled'} onclick="confirmImageImport()">Add ${toAdd.length} shift${toAdd.length===1?"":"s"} to the schedule</button>
+      <button class="btn secondary" onclick="discardImageImport()">Discard</button>
+    </div>`;
+}
+function confirmImageImport(){
+  if(!pendingImageImport) return;
+  snapshot();
+  let added = 0;
+  pendingImageImport.candidates.forEach(c=>{
+    if(c.duplicate) return;
+    state.assignments.push({ id:"a"+Math.random().toString(36).slice(2), nurseId:c.nurseId, date:c.date, start:c.start, duration:c.duration });
+    added++;
+  });
+  flashMessage = `Added ${added} shift${added===1?"":"s"} from the photo.`;
+  pendingImageImport = null;
+  render();
+}
+function discardImageImport(){ pendingImageImport = null; flashMessage = ""; render(); }
 function addHoliday(){
   const v = document.getElementById("newHolidayDate").value;
   if(v && !state.holidays.includes(v)){ snapshot(); state.holidays.push(v); }
@@ -1649,10 +1811,10 @@ function printGridHTML(){
   return `
     <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
     <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabel()}${note?` — ${note}`:""}</p>
-    <table style="border-collapse:collapse;width:100%">
+    <div class="print-scroll"><table style="border-collapse:collapse;width:100%">
       <thead><tr><th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Nurse</th>${headerCells}</tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
     ${state.printOpts.includeHoliday && state.holidays.some(h=>DAYS.includes(h)) ? `<p style="font-size:10px;color:#666;margin-top:8px">★ = configured holiday</p>` : ""}
   `;
 }
@@ -1693,7 +1855,7 @@ function printCensusHistoryHTML(){
   return `
     <h2 style="margin:0 0 4px">EMPATH Unit — Census &amp; FTE History (${state.censusViewMode==='month'?'Month over month':'Week over week'})</h2>
     <p style="margin:0 0 12px;color:#444;font-size:12px">${note?note+" — ":""}Generated ${new Date().toLocaleDateString()}</p>
-    <table style="border-collapse:collapse;width:100%">
+    <div class="print-scroll"><table style="border-collapse:collapse;width:100%">
       <thead><tr>
         <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">${state.censusViewMode==='month'?'Month':'Week of'}</th>
         <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Avg day census</th>
@@ -1702,7 +1864,7 @@ function printCensusHistoryHTML(){
         <th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Available FTE (roster)</th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
     <p style="font-size:10px;color:#666;margin-top:10px">Every number above comes from recorded census entries and actual scheduled shifts, nothing simulated. * = FTE imported directly from a spreadsheet rather than computed from schedule data (used for backdated weeks with no assignment history).</p>
   `;
 }
@@ -2004,7 +2166,7 @@ function employeePortal(){
       <p class="desc">Unit average right now is ${unitAvg.toFixed(1)}. ${total>unitAvg
         ? "You're above average, meaning you've carried more of the unit's undesirable shifts or had more requests denied than most. That gives you standing for your next time-off request or to be skipped for the next unwanted pickup."
         : "You're at or below the unit average right now."} Here's exactly how it's built, nothing hidden:</p>
-      <table><thead><tr><th>Factor</th><th>Calculation</th><th>Points</th></tr></thead><tbody>${bdRows}</tbody></table>
+      <div style="overflow-x:auto;"><table><thead><tr><th>Factor</th><th>Calculation</th><th>Points</th></tr></thead><tbody>${bdRows}</tbody></table></div>
       <p class="foot-note">Call-offs aren't part of this score. This measures how the unit has treated you, not your attendance record, the two are tracked separately on purpose.</p>
     </div>`;
 
@@ -2029,7 +2191,7 @@ function employeePortal(){
         <button class="btn ${state.employeeView==='month'?'':'secondary'}" onclick="setEmployeeView('month')">Month</button>
       </div>
       ${state.employeeView==='week'
-        ? `${weekNavControlHTML()}<table><thead><tr><th>Date</th><th>Shift</th></tr></thead><tbody>${shiftRows}</tbody></table>
+        ? `${weekNavControlHTML()}<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Shift</th></tr></thead><tbody>${shiftRows}</tbody></table></div>
            <p class="foot-note">Requests and census are sent from the Month view, tap days on the calendar.</p>`
         : employeeCalendarHTML(emp.id) + employeeActionPanel(emp)}
     </div>
