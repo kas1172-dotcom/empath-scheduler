@@ -220,10 +220,26 @@ let state = {
   },
   manualFTE: {}, // dateISO -> a real historical FTE figure imported from a spreadsheet, overrides the computed one
   syncedWeeks: [], // week-start ISO dates already folded into equity YTD, guards against double-counting
-  // Blank by design — this is the live app. Add real staff in the Roster tab, then bring in real
-  // history with the spreadsheet or photo import on the Census & FTE tab, and real census either
-  // from there or from staff submitting it themselves in the Employee portal.
-  nurses: [],
+  // This roster reflects the unit's actual staff and stays. Shifts, requests, and census were a
+  // single illustrative past week, not real data, so those start blank — bring in real history
+  // with the spreadsheet or photo import on the Census & FTE tab, build weeks going forward in
+  // Coverage, and let real census come from there or from staff submitting it in the Employee portal.
+  nurses: [
+    {id:"n1", name:"Laurie Swift",     role:"Manager", fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n2", name:"Anthony Trocano",  role:"Manager", fte:1.0, cert:true,  pref:19, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n3", name:"Christine Davis",  role:"RN",      fte:1.0, cert:true,  pref:9,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n4", name:"Kimberly Fritz",   role:"RN",      fte:1.0, cert:true,  pref:12, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n5", name:"Mary Ronca",       role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n6", name:"Dawn Erickson",    role:"RN",      fte:1.0, cert:false, pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n7", name:"Edward Earvin",    role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n8", name:"Arnetta Sciulli",  role:"RN",      fte:0.5, cert:false, pref:21, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n9", name:"Dyan Conaway",     role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n10",name:"Christina Stevens",role:"RN",      fte:1.0, cert:true,  pref:21, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n11",name:"Faith Ndiga",      role:"RN",      fte:0.5, cert:false, pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p1", name:"Hemant Thapa", role:"Aide", fte:1.0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p2", name:"Kapil Sharma", role:"Aide", fte:0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p3", name:"General Sitter (pool, fills gaps)", role:"Aide", fte:0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+  ],
   assignments: [],
   requests: [],
 };
