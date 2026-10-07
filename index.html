@@ -709,7 +709,7 @@ function coverageTab(){
         <li>Checks every hour of each day/night band, not just the start, so a shorter shift that leaves a gap partway through still gets caught.</li>
         <li>Closes one gap at a time with a standard-length shift (8h if the gap is narrow, 12h if it spans more of the band) sized and placed to cover just that gap, instead of always stacking a full 12-hour shift from the band's start, which used to overstaff the band's easier hours.</li>
         <li>Only considers nurses who are free: not already on shift, not on approved PTO, rest-compliant (10+ hours since their last shift), and under a hard 60-hour weekly cap (only crossed if every eligible option for that specific gap is already past it, so a gap never goes unfilled over it, flagged in the summary when it happens).</li>
-        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); for a night-band gap, fewest nights already carried (year-to-date plus this run) next, to actively rotate who takes nights rather than leaving it to chance; then shift-time preference match; then fewest hours already scheduled this week; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
+        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); then fewest hours already scheduled this week, the main lever for actually leveling out the load instead of the same well-matched few climbing into OT while others sit at zero; then, for a night-band gap, fewest nights already carried (year-to-date plus this run), to rotate who takes nights rather than leaving it to chance; then shift-time preference match; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
         <li>Swaps in a certified nurse for the gap it's filling if no one already covering that window is certified.</li>
       </ul>
       <div class="row">
@@ -936,17 +936,22 @@ function runAutoFill(){
       eligible.sort((a,c)=>{
         const consA = consecutiveDaysWorked(a.id, startCell.date)>=3 ? 1:0, consC = consecutiveDaysWorked(c.id, startCell.date)>=3 ? 1:0;
         if(consA!==consC) return consA-consC; // fatigue guard: 3-in-a-row goes last, never excluded outright
-        // Night-band gaps rank by who's carried the fewest nights (YTD plus whatever this run has
-        // already handed them), ahead of preference match — the direct lever for "fairly distribute
-        // night shifts" rather than leaving it to equityScore's broader, lower-weighted mix.
+        // Fewest hours already scheduled this week is the PRIMARY ranking lever, ahead of preference.
+        // Preference-first (the old order) let anyone whose preferred start matched a band keep
+        // winning gap after gap as their hours climbed into OT, while someone whose preference didn't
+        // match sat at zero all week even with nothing else scheduled — exactly backwards for fair
+        // distribution. Hours-first means load actually levels out across the roster before anyone's
+        // preference tips the balance.
+        const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
+        if(hoursA!==hoursC) return hoursA-hoursC;
+        // Among nurses at the same hours, a night-band gap still rotates by who's carried the fewest
+        // nights (YTD plus whatever this run has already handed them) before preference.
         if(b.label==="night"){
           const nightsA = (a.nightsYTD||0)+(nightsThisRun[a.id]||0), nightsC = (c.nightsYTD||0)+(nightsThisRun[c.id]||0);
           if(nightsA!==nightsC) return nightsA-nightsC;
         }
         const prefA = Math.abs(a.pref-b.start)<=2 ? 0:1, prefC = Math.abs(c.pref-b.start)<=2 ? 0:1;
         if(prefA!==prefC) return prefA-prefC;
-        const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
-        if(hoursA!==hoursC) return hoursA-hoursC;
         return equityScore(a)-equityScore(c);
       });
 
