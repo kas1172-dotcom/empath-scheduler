@@ -1258,7 +1258,13 @@ async function readScheduleImageFile(file, label){
     body: JSON.stringify({ imageBase64, mediaType:"image/jpeg" }),
   });
   const body = await res.json();
-  if(!res.ok) return { candidates:[], notes:[`${label}: ${body.error || "couldn't read that photo"}`] };
+  if(!res.ok){
+    // body.error is a generic one-liner ("The vision model call failed."); body.detail, when present,
+    // is the actual error text from the upstream API call (bad key, unknown model, rate limit, etc.)
+    // and used to be dropped on the floor here, leaving no way to tell those causes apart.
+    const msg = body.detail ? `${body.error || "couldn't read that photo"} — ${String(body.detail).slice(0,300)}` : (body.error || "couldn't read that photo");
+    return { candidates:[], notes:[`${label}: ${msg}`] };
+  }
   const shifts = Array.isArray(body.shifts) ? body.shifts : [];
   if(!shifts.length) return { candidates:[], notes:[`${label}: no readable shifts found`] };
   const candidates = [], notes = [];
@@ -1410,7 +1416,8 @@ async function sendChatMessage(){
     });
     const body = await res.json();
     if(!res.ok){
-      chatLog.push({role:"assistant", text: body.error || "Something went wrong talking to the assistant."});
+      const msg = body.detail ? `${body.error || "Something went wrong talking to the assistant."} — ${String(body.detail).slice(0,300)}` : (body.error || "Something went wrong talking to the assistant.");
+      chatLog.push({role:"assistant", text: msg});
     } else {
       chatLog.push({role:"assistant", text: body.reply || "(no reply)", actions: Array.isArray(body.actions)?body.actions:[]});
     }
