@@ -123,6 +123,18 @@ device persistence. The GitHub Pages copy and the Claude artifact keep working e
 as before (falling back to localStorage / the `db` capability respectively); nothing
 about deploying this changes them.
 
+**First-time setup on a fresh deploy** — the app ships with no staff, no shifts, and no
+census data, by design, so there's nothing demo-ish to clear out before real use:
+1. **Roster tab**: add every nurse, manager, and aide (role, FTE, cert status, preferred
+   shift start). This is the one thing that has to be done by hand first, everything
+   else matches people up against it by name.
+2. **Census & FTE tab**: bring in real history for the ratio/FTE tracking to mean
+   anything, either the spreadsheet import, the photo import (once the API key's set),
+   or typing it in directly.
+3. Going forward, build each week in the Coverage tab (manually or with Auto-fill), and
+   have staff submit their own census from the Employee portal, or keep entering it
+   yourself.
+
 ## Known gaps, in priority order
 
 1. **No real accounts or access control.** Anyone with the link sees everything.
