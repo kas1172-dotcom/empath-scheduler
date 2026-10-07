@@ -506,6 +506,85 @@ function typicalStartHour(nurseId){
   Object.entries(counts).forEach(([h,n])=>{ if(n>bestN){ bestN=n; best=Number(h); } });
   return best;
 }
+// The approved, date-specific "Desired shift" request for this nurse, if any — a one-off ask the
+// nurse actually made this week, which should outrank their standing weekly preference or pattern.
+// Approving the request still never places the shift by itself (see Requests tab); this only makes
+// auto-fill favor that nurse for a matching gap on that date if you run it afterward.
+function approvedDesiredShift(nurseId, dateISO){
+  return state.requests.find(r=>r.nurseId===nurseId && r.date===dateISO && r.type==="Desired shift" && r.status==="approved" && r.start!=null);
+}
+// Single ranked tier (0=best, 3=no signal) for "does this nurse want to start at this hour on this
+// date". Used both as the auto-fill sort tiebreak and as the repair pass's objective below, so the
+// two stay consistent with each other instead of drifting apart.
+function shiftPreferenceTier(n, dateISO, startHour){
+  const req = approvedDesiredShift(n.id, dateISO);
+  if(req && Math.abs(req.start-startHour)<=2) return 0;
+  const typ = typicalStartHour(n.id);
+  if(typ!=null && Math.abs(typ-startHour)<=2) return 1;
+  if(nursePrefs(n).some(p=>Math.abs(p-startHour)<=2)) return 2;
+  return 3;
+}
+function bandOfStart(h){ return (h>=19 || h<7) ? "night" : "day"; }
+function loadRatio(n){ const fte = n.fte>0 ? n.fte : 0.1; return weeklyHoursFor(n.id)/(fte*state.otThreshold); }
+// Can nurse n take over `target`'s slot (date/start/duration), given they're simultaneously giving
+// up `own` (so own's current slot doesn't count against them as a rest/overlap conflict)? Reuses the
+// exact same hard-constraint checks the main fill loop uses, so a repair swap can never produce a
+// placement the greedy pass itself would have refused to make.
+function canTakeSlot(n, target, own){
+  if(n.role==="Aide") return false;
+  const st = nurseShiftType(n);
+  if(st!=="any" && st!==bandOfStart(target.start)) return false;
+  if(approvedPTO(n.id, target.date)) return false;
+  if(restViolation(n.id, target.date, target.start, target.duration, own.id)) return false;
+  return true;
+}
+// Local-search repair pass: after the greedy fill above, look for pairs of shifts it just added
+// that would improve the OVERALL schedule if swapped between the two nurses holding them — same
+// total coverage, better balance. The greedy pass fills one gap at a time and can't see later gaps
+// coming, so an early pick that looked fine in isolation sometimes isn't the best one in hindsight;
+// this catches what a single greedy pass structurally can't. Scoped to only the shifts THIS run
+// added (never touches a shift you placed by hand or a previous run made), and only accepts a swap
+// that: (a) doesn't break shift-type lock, approved PTO, or rest/overlap for either nurse at the
+// other's slot, and (b) strictly improves the objective — FTE-normalized load variance across the
+// whole roster, weighted well above preference-tier mismatches on the shifts in play, matching the
+// same "fairness first, then preference" priority the greedy fill itself uses.
+function repairPass(addedIds){
+  let swapped = 0;
+  for(let iter=0; iter<40; iter++){
+    const assigns = addedIds.map(id=>state.assignments.find(a=>a.id===id)).filter(Boolean);
+    if(assigns.length<2) break;
+    const rnNurses = state.nurses.filter(n=>n.role!=="Aide");
+    const objective = ()=>{
+      const ratios = rnNurses.map(loadRatio);
+      const mean = ratios.reduce((s,v)=>s+v,0)/ratios.length;
+      const variance = ratios.reduce((s,v)=>s+(v-mean)*(v-mean),0);
+      const mismatch = assigns.reduce((s,a)=>s+shiftPreferenceTier(nurse(a.nurseId), a.date, a.start),0);
+      return variance*10 + mismatch;
+    };
+    const base = objective();
+    let bestGain = 1e-9, bestPair = null;
+    for(let i=0;i<assigns.length;i++){
+      for(let j=i+1;j<assigns.length;j++){
+        const A = assigns[i], C = assigns[j];
+        if(A.nurseId===C.nurseId) continue;
+        const nA = nurse(A.nurseId), nC = nurse(C.nurseId);
+        if(!nA || !nC) continue;
+        if(!canTakeSlot(nA, C, A) || !canTakeSlot(nC, A, C)) continue;
+        const origA = A.nurseId, origC = C.nurseId;
+        A.nurseId = origC; C.nurseId = origA;
+        const gain = base - objective();
+        A.nurseId = origA; C.nurseId = origC; // revert, re-apply only if this pair wins below
+        if(gain > bestGain){ bestGain = gain; bestPair = [A,C]; }
+      }
+    }
+    if(!bestPair) break;
+    const [A,C] = bestPair;
+    const origA = A.nurseId;
+    A.nurseId = C.nurseId; C.nurseId = origA;
+    swapped++;
+  }
+  return swapped;
+}
 function isWeekend(iso){ const day = new Date(iso+"T00:00:00").getDay(); return day===0 || day===6; }
 function isHoliday(iso){ return state.holidays.includes(iso); }
 
@@ -756,8 +835,9 @@ function coverageTab(){
         <li>Checks every hour of each day/night band, not just the start, so a shorter shift that leaves a gap partway through still gets caught.</li>
         <li>Closes one gap at a time with a standard-length shift (8h if the gap is narrow, 12h if it spans more of the band) sized and placed to cover just that gap, instead of always stacking a full 12-hour shift from the band's start, which used to overstaff the band's easier hours.</li>
         <li>Only considers nurses who are free: not already on shift, not on approved PTO, rest-compliant (10+ hours since their last shift), under a hard 60-hour weekly cap (only crossed if every eligible option for that specific gap is already past it, so a gap never goes unfilled over it, flagged in the summary when it happens), and not locked out of this band by a hard "Day only" / "Night only" shift-type setting in Roster (a day-only nurse is never even considered for a night gap, full stop, not just deprioritized).</li>
-        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); then fewest hours already scheduled this week relative to their own FTE (a 0.5 FTE nurse at 20hrs ranks as "full" right alongside a 1.0 FTE nurse at 40hrs), the main lever for actually leveling out the load instead of the same well-matched few climbing into OT while others sit idle; then, for a night-band gap, fewest nights already carried (year-to-date plus this run), to rotate who takes nights rather than leaving it to chance; then whether this gap's actual start time matches a pattern they've actually worked in the last 4 weeks, to keep an individual's week-to-week schedule predictable once there's real history to go on; then whether it matches one of their stated preferred start times in Roster; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
+        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); then fewest hours already scheduled this week relative to their own FTE (a 0.5 FTE nurse at 20hrs ranks as "full" right alongside a 1.0 FTE nurse at 40hrs), the main lever for actually leveling out the load instead of the same well-matched few climbing into OT while others sit idle; then, for a night-band gap, fewest nights already carried (year-to-date plus this run), to rotate who takes nights rather than leaving it to chance; then one combined "does this suit them" tier — an approved Desired-shift request for this exact date beats a pattern they've actually worked the last 4 weeks, which beats a standing stated preference, which beats no signal at all; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
         <li>Swaps in a certified nurse for the gap it's filling if no one already covering that window is certified.</li>
+        <li>Cleanup pass after the fill: looks for pairs of shifts it just added that would be better swapped between the two nurses holding them, same total coverage, better FTE-balance and preference match overall. Only touches shifts from this run, never a hand-placed one, and only accepts a swap that doesn't break shift-type lock, PTO, or rest rules for either nurse.</li>
       </ul>
       <div class="row">
         <button class="btn" onclick="runAutoFill()">Auto-fill gaps</button>
@@ -925,6 +1005,7 @@ function runAutoFill(){
   const plan = [{d:addDays(DAYS[0],-1), b:bands[1], weekOnly:true}];
   DAYS.forEach(d=>bands.forEach(b=>plan.push({d,b,weekOnly:false})));
   let added = 0, addedBefore = 0, uncoverable = 0, capOverridden = 0;
+  const addedIds = []; // this run's new assignment ids, scope for the repair pass below
   const nightsThisRun = {}; // nurseId -> night-band shifts added so far in this run, for fair-rotation ranking below
   // Hard safety ceiling on top of the OT threshold's soft tie-break: without this, a nurse who keeps
   // winning the ranking (best preference match, fewest hours *before* this run started, etc.) can get
@@ -1004,18 +1085,15 @@ function runAutoFill(){
           const nightsA = (a.nightsYTD||0)+(nightsThisRun[a.id]||0), nightsC = (c.nightsYTD||0)+(nightsThisRun[c.id]||0);
           if(nightsA!==nightsC) return nightsA-nightsC;
         }
-        // Before stated preference, favor whoever's own recent actual pattern already matches this
-        // start time — keeps week-to-week schedules predictable for staff once enough shift history
-        // exists to have a pattern, rather than treating every week as a fresh blank slate.
-        // Both this and the preference match below compare against startCell.hour, the actual
-        // computed start of THIS gap (e.g. 1p for an 8h gap inside the day band), not b.start, the
-        // band's fixed 7a/7p anchor — comparing to the band anchor meant a mid-day preference (9a,
-        // 11a, 1p) could never win a tiebreak no matter how good a match it was for this specific gap.
-        const typA = typicalStartHour(a.id), typC = typicalStartHour(c.id);
-        const consistA = typA!=null && Math.abs(typA-startCell.hour)<=2 ? 0:1, consistC = typC!=null && Math.abs(typC-startCell.hour)<=2 ? 0:1;
-        if(consistA!==consistC) return consistA-consistC;
-        const prefA = nursePrefs(a).some(p=>Math.abs(p-startCell.hour)<=2) ? 0:1, prefC = nursePrefs(c).some(p=>Math.abs(p-startCell.hour)<=2) ? 0:1;
-        if(prefA!==prefC) return prefA-prefC;
+        // Everything about "does this start time suit this nurse" collapses into one ranked tier
+        // (0=best): an approved one-off Desired-shift request for this exact date beats a standing
+        // weekly pattern, which beats a standing stated preference, which beats no signal at all.
+        // All three compare against startCell.hour, the actual computed start of THIS gap (e.g. 1p
+        // for an 8h gap inside the day band), not b.start, the band's fixed 7a/7p anchor — comparing
+        // to the band anchor meant a mid-day preference (9a, 11a, 1p) could never win a tiebreak no
+        // matter how good a match it was for this specific gap.
+        const tierA = shiftPreferenceTier(a, startCell.date, startCell.hour), tierC = shiftPreferenceTier(c, startCell.date, startCell.hour);
+        if(tierA!==tierC) return tierA-tierC;
         return equityScore(a)-equityScore(c);
       });
 
@@ -1029,15 +1107,18 @@ function runAutoFill(){
         if(certPick) pick = certPick;
       }
 
-      state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:pick.id, date:startCell.date, start:startCell.hour, duration:span});
+      const newId = "a"+Math.random().toString(36).slice(2);
+      state.assignments.push({id:newId, nurseId:pick.id, date:startCell.date, start:startCell.hour, duration:span});
+      addedIds.push(newId);
       added++; if(weekOnly) addedBefore++;
       if(b.label==="night") nightsThisRun[pick.id] = (nightsThisRun[pick.id]||0)+1;
     }
   });
+  const swapped = addedIds.length>1 ? repairPass(addedIds) : 0;
   const shortAfter = shortHoursInWeek();
   const hrs = n=>`${n} hour${n===1?"":"s"}`;
   autoFillNote = (added
-      ? `Auto-fill added ${added} shift${added===1?"":"s"}${addedBefore?` (${addedBefore} of them start the Sunday night before this week, to cover Monday's early hours)`:""}, taking short hours from ${shortBefore} to ${shortAfter}. `
+      ? `Auto-fill added ${added} shift${added===1?"":"s"}${addedBefore?` (${addedBefore} of them start the Sunday night before this week, to cover Monday's early hours)`:""}, taking short hours from ${shortBefore} to ${shortAfter}.${swapped?` A cleanup pass then swapped ${swapped} pair${swapped===1?"":"s"} of those shifts between nurses to improve overall balance, same total coverage.`:""} `
       : `Auto-fill had nothing it could add. `)
     + (shortAfter
       ? `${hrs(shortAfter)} still below requirement: nobody is free for them (approved time off, rest rules, or already on shift). Add coverage by hand, or lower the requirement. `
@@ -2000,9 +2081,12 @@ function setReqStatus(id,status){
       flashMessage = `${safeName}'s Off request approved for ${r.date}${removed?`, ${removed} conflicting shift(s) removed from Coverage`:''}. They won't be scheduled that day, and it counts toward their equity score at a lower weight than PTO.`;
     }
   } else {
-    // Desired shift: informational. Counts toward equity, but never moves a shift on its own.
+    // Desired shift: counts toward equity, and approving it never places the shift by itself — but
+    // (via approvedDesiredShift/shiftPreferenceTier) auto-fill now gives it top priority for a
+    // matching gap on that date if you run auto-fill afterward. Still won't touch it if you build
+    // the week by hand instead.
     if(status==="denied"){ n.prefDenied += 1; flashMessage = `${safeName}'s desired shift for ${r.date} denied — added to their equity score.`; }
-    else{ n.prefHonored += 1; flashMessage = `${safeName}'s desired shift (${esc(reqLabel(r))}) for ${r.date} approved — counted in their equity score. This doesn't put them on the schedule, build it in yourself.`; }
+    else{ n.prefHonored += 1; flashMessage = `${safeName}'s desired shift (${esc(reqLabel(r))}) for ${r.date} approved — counted in their equity score. Doesn't place the shift by itself; if you run Auto-fill, it'll favor this nurse for a matching gap that date, otherwise build it in yourself.`; }
   }
   render();
 }
