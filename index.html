@@ -1077,9 +1077,9 @@ function censusTab(){
 
     <div class="panel">
       <h2>Import past shifts from a photo</h2>
-      <p class="desc">Take or upload a photo of a printed or handwritten schedule and this reads it with a vision model, the same way the spreadsheet import above works but for a picture instead of a file. ${persistMode==='server' ? 'The photo is sent to this app\'s own server, which calls the model and never stores the image itself.' : 'This needs the Fly.io-hosted version of this app, since reading a photo requires a server-side model call that a plain static copy can\'t make. '+(persistMode==='cloud'?'Not available in this demo viewer.':'Deploy the server (see the README) to turn this on.')}</p>
+      <p class="desc">Take or upload one or more photos of a printed or handwritten schedule and this reads each one with a vision model, the same way the spreadsheet import above works but for pictures instead of a file. ${persistMode==='server' ? 'Each photo is sent to this app\'s own server, which calls the model and never stores the image itself.' : 'This needs the Fly.io-hosted version of this app, since reading a photo requires a server-side model call that a plain static copy can\'t make. '+(persistMode==='cloud'?'Not available in this demo viewer.':'Deploy the server (see the README) to turn this on.')}</p>
       <div class="row">
-        <input type="file" accept="image/*" capture="environment" ${persistMode!=='server'?'disabled':''} onchange="handleScheduleImageUpload(this)">
+        <input type="file" accept="image/*" capture="environment" multiple ${persistMode!=='server'?'disabled':''} onchange="handleScheduleImageUpload(this)">
       </div>
       <div id="imageImportResult" style="margin-top:8px"></div>
     </div>
@@ -1248,50 +1248,81 @@ function downscaleImageToJPEGBase64(file, maxDim=1600, quality=0.82){
     img.src = url;
   });
 }
+// Reads and matches the shifts in ONE photo file against the current roster, without touching
+// pendingImageImport or flashMessage itself — handleScheduleImageUpload calls this once per file
+// and merges the results, so multiple photos land in a single combined preview.
+async function readScheduleImageFile(file, label){
+  const imageBase64 = await downscaleImageToJPEGBase64(file);
+  const res = await fetch("/api/parse-schedule-image", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ imageBase64, mediaType:"image/jpeg" }),
+  });
+  const body = await res.json();
+  if(!res.ok) return { candidates:[], notes:[`${label}: ${body.error || "couldn't read that photo"}`] };
+  const shifts = Array.isArray(body.shifts) ? body.shifts : [];
+  if(!shifts.length) return { candidates:[], notes:[`${label}: no readable shifts found`] };
+  const candidates = [], notes = [];
+  const unmatchedNames = new Set(), badDates = [], badTimes = [];
+  shifts.forEach((s,i)=>{
+    if(!s || !s.date || !s.nurse){ return; }
+    const d = new Date(s.date+"T00:00:00");
+    if(isNaN(d)){ badDates.push(`#${i+1} (${s.date})`); return; }
+    const iso = isoLocal(d);
+    const name = String(s.nurse).trim().toLowerCase();
+    const n = state.nurses.find(x=>x.name.trim().toLowerCase()===name)
+      || state.nurses.find(x=>x.name.trim().toLowerCase().includes(name) || name.includes(x.name.trim().toLowerCase()));
+    if(!n){ unmatchedNames.add(String(s.nurse).trim()); return; }
+    const start = parseHourLabel(s.start);
+    if(start==null){ badTimes.push(`${s.nurse} on ${iso}`); return; }
+    let duration = 12; // sane default when the model couldn't read an end time
+    if(s.end){ const end = parseHourLabel(s.end); if(end!=null) duration = ((end-start+24)%24) || 24; }
+    const already = state.assignments.some(a=>a.nurseId===n.id && a.date===iso && a.start===start && a.duration===duration);
+    candidates.push({ nurseId:n.id, nurseName:n.name, date:iso, start, duration, duplicate:already });
+  });
+  if(unmatchedNames.size) notes.push(`${label}: ${unmatchedNames.size} name${unmatchedNames.size===1?"":"s"} not found in Roster: ${[...unmatchedNames].join(", ")}`);
+  if(badDates.length) notes.push(`${label}: ${badDates.length} shift(s) with an unreadable date`);
+  if(badTimes.length) notes.push(`${label}: ${badTimes.length} shift(s) with an unreadable start time`);
+  return { candidates, notes };
+}
 async function handleScheduleImageUpload(input){
-  const file = input.files[0];
-  if(!file) return;
-  flashMessage = "Reading photo and matching it against your roster, this can take a few seconds…";
+  const files = Array.from(input.files || []);
+  if(!files.length) return;
   pendingImageImport = null;
+  const multi = files.length>1;
+  flashMessage = multi
+    ? `Reading ${files.length} photos and matching them against your roster, this can take a little while…`
+    : "Reading photo and matching it against your roster, this can take a few seconds…";
   render();
   try{
-    const imageBase64 = await downscaleImageToJPEGBase64(file);
-    const res = await fetch("/api/parse-schedule-image", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ imageBase64, mediaType:"image/jpeg" }),
-    });
-    const body = await res.json();
-    if(!res.ok){ flashMessage = body.error || "Couldn't read that photo."; input.value=""; render(); return; }
-    const shifts = Array.isArray(body.shifts) ? body.shifts : [];
-    if(!shifts.length){ flashMessage = "Didn't find any readable shifts in that photo. Try a clearer or better-lit photo."; input.value=""; render(); return; }
-    const candidates = [], notes = [];
-    const unmatchedNames = new Set(), badDates = [], badTimes = [];
-    shifts.forEach((s,i)=>{
-      if(!s || !s.date || !s.nurse){ return; }
-      const d = new Date(s.date+"T00:00:00");
-      if(isNaN(d)){ badDates.push(`#${i+1} (${s.date})`); return; }
-      const iso = isoLocal(d);
-      const name = String(s.nurse).trim().toLowerCase();
-      const n = state.nurses.find(x=>x.name.trim().toLowerCase()===name)
-        || state.nurses.find(x=>x.name.trim().toLowerCase().includes(name) || name.includes(x.name.trim().toLowerCase()));
-      if(!n){ unmatchedNames.add(String(s.nurse).trim()); return; }
-      const start = parseHourLabel(s.start);
-      if(start==null){ badTimes.push(`${s.nurse} on ${iso}`); return; }
-      let duration = 12; // sane default when the model couldn't read an end time
-      if(s.end){ const end = parseHourLabel(s.end); if(end!=null) duration = ((end-start+24)%24) || 24; }
-      const already = state.assignments.some(a=>a.nurseId===n.id && a.date===iso && a.start===start && a.duration===duration);
-      candidates.push({ nurseId:n.id, nurseName:n.name, date:iso, start, duration, duplicate:already });
-    });
-    if(unmatchedNames.size) notes.push(`${unmatchedNames.size} name${unmatchedNames.size===1?"":"s"} not found in Roster: ${[...unmatchedNames].join(", ")}`);
-    if(badDates.length) notes.push(`${badDates.length} shift(s) with an unreadable date`);
-    if(badTimes.length) notes.push(`${badTimes.length} shift(s) with an unreadable start time`);
-    if(!candidates.length){ flashMessage = `Read the photo but couldn't match any shifts to your roster.${notes.length?" "+notes.join("; ")+".":""}`; input.value=""; render(); return; }
+    // Independent server calls, run together rather than one at a time.
+    const results = await Promise.all(files.map((f,i)=>
+      readScheduleImageFile(f, multi ? `Photo ${i+1} (${f.name||"untitled"})` : "This photo")
+        .catch(err=>({ candidates:[], notes:[`${multi?`Photo ${i+1} (${f.name||"untitled"})`:"This photo"}: couldn't read it (${err.message})`] }))
+    ));
+    const notes = results.flatMap(r=>r.notes);
+    // Merge candidates across photos, flagging as duplicate anything already on the schedule OR
+    // already picked up from an earlier photo in this same batch (two photos of the same week easily
+    // overlap), so the preview never offers to add the same shift twice.
+    const seen = new Set();
+    const candidates = [];
+    results.forEach(r=>r.candidates.forEach(c=>{
+      const key = `${c.nurseId}|${c.date}|${c.start}|${c.duration}`;
+      if(seen.has(key)){ candidates.push({...c, duplicate:true}); return; }
+      seen.add(key);
+      candidates.push(c);
+    }));
+    if(!candidates.length){
+      flashMessage = multi
+        ? `Read ${files.length} photos but couldn't match any shifts to your roster.${notes.length?" "+notes.join("; ")+".":""}`
+        : `Read the photo but couldn't match any shifts to your roster.${notes.length?" "+notes.join("; ")+".":""}`;
+      input.value = ""; render(); return;
+    }
     pendingImageImport = { candidates, notes };
     flashMessage = "";
     input.value = "";
     render();
   } catch(err){
-    flashMessage = `Couldn't read that photo (${err.message}).`;
+    flashMessage = `Couldn't read ${files.length>1?"those photos":"that photo"} (${err.message}).`;
     input.value = "";
     render();
   }
@@ -1308,7 +1339,7 @@ function renderImageImportPreview(){
     <td>${c.duplicate?'<span class="pill" style="background:var(--border-soft);color:var(--ink-soft)">already scheduled</span>':'<span class="pill" style="background:var(--green-soft);color:var(--green)">new</span>'}</td>
   </tr>`).join("");
   el.innerHTML = `
-    <div class="flag warn block">Read ${candidates.length} shift${candidates.length===1?"":"s"} from the photo, ${toAdd.length} new, ${dupeCount} already on the schedule. Check this against the actual photo before confirming, a vision model can still misread a name or a time.${notes.length?" "+notes.join("; ")+".":""}</div>
+    <div class="flag warn block">Read ${candidates.length} shift${candidates.length===1?"":"s"}, ${toAdd.length} new, ${dupeCount} already accounted for (on the schedule or a repeat from another photo). Check this against the actual photo(s) before confirming, a vision model can still misread a name or a time.${notes.length?" "+notes.join("; ")+".":""}</div>
     <div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Date</th><th>Nurse</th><th>Shift</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="row" style="margin-top:10px">
       <button class="btn" ${toAdd.length?'':'disabled'} onclick="confirmImageImport()">Add ${toAdd.length} shift${toAdd.length===1?"":"s"} to the schedule</button>
