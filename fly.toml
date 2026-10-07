@@ -1,7 +1,7 @@
 # EMPATH Unit Scheduler — Fly.io app config.
 # `app` must be globally unique on Fly; `fly launch` will prompt you to pick one if this name is taken.
 app = "empath-scheduler"
-primary_region = "iad"
+primary_region = "ord"
 
 [build]
 
