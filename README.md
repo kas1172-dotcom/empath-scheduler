@@ -73,6 +73,15 @@ Saved, Saving…, or erroring. It never fails silently.
 - Export the current week's shifts to `.xlsx`
 - Print: grid, daily list, or a census/FTE history report, portrait or landscape
 
+**Assistant**
+- A chat tab where a manager can ask questions ("who's working Saturday night") or describe
+  a change in plain English ("give Dawn Friday off", "Edward needs Oct 10–24 off") — also
+  needs the Fly.io backend and `ANTHROPIC_API_KEY` (see below), it's a server-side model call
+  like photo import. It can add/remove shifts, mark someone off for a date range, update FTE,
+  or correct a census number. It never changes anything on its own: every proposed change is
+  shown for review first, with Apply/Discard, exactly like photo import's preview step, and
+  anything applied goes through the same Undo history as a manual edit.
+
 **Making the FTE case**
 - Census & FTE tracks your own ratio target against actual staffing, retrospectively
   (this unit's census is ED-driven and can't be forecast, so it's not used to set a

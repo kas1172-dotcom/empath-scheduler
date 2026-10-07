@@ -50,10 +50,17 @@
   .panel .desc{ color:var(--ink-soft); font-size:12.5px; margin:0 0 14px; max-width:72ch; }
   .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   label{ font-size:12px; color:var(--ink-soft); display:block; margin-bottom:3px; }
-  select, input[type=number], input[type=text], input[type=date], input[type=time]{
+  select, input[type=number], input[type=text], input[type=date], input[type=time], textarea{
     font:inherit; font-family:var(--sans); padding:6px 8px; border:1px solid var(--border);
     border-radius:4px; background:var(--panel); color:var(--ink); min-width:0;
   }
+  .chat-msg{ margin-bottom:10px; display:flex; }
+  .chat-msg.chat-user{ justify-content:flex-end; }
+  .chat-msg.chat-assistant{ justify-content:flex-start; flex-direction:column; align-items:flex-start; }
+  .chat-bubble{ display:inline-block; padding:8px 12px; border-radius:10px; font-size:13px; line-height:1.5; max-width:85%; white-space:pre-wrap; }
+  .chat-user .chat-bubble{ background:var(--purple); color:#fff; }
+  .chat-assistant .chat-bubble{ background:var(--border-soft); color:var(--ink); }
+  .chat-msg.chat-assistant > div{ max-width:100%; }
   button.btn{ font:inherit; padding:7px 13px; border-radius:4px; border:1px solid var(--purple); background:var(--purple); color:#fff; cursor:pointer; font-weight:600; font-size:12.5px; }
   button.btn.secondary{ background:transparent; color:var(--purple); }
   button.btn.danger{ background:var(--rust); border-color:var(--rust); color:#fff; }
@@ -545,7 +552,7 @@ function scoreBreakdown(n){
 function equityScore(n){ return scoreBreakdown(n).reduce((s,x)=>s+x.points,0); }
 
 /* ============ RENDER ============ */
-const TABS = ["Coverage","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
+const TABS = ["Coverage","Assistant","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
 let activeTab = "Coverage";
 
 function render(){
@@ -557,6 +564,7 @@ function render(){
   renderNav();
   renderMain();
   renderImageImportPreview();
+  scrollChatToBottom();
 }
 function shiftWeek(n){ state.weekStart = addDays(state.weekStart, 7*n); render(); }
 function weekLabel(){
@@ -613,6 +621,7 @@ function renderMain(){
   const m = document.getElementById("main");
   if(state.mode==="employee"){ m.innerHTML = employeePortal(); return; }
   if(activeTab==="Coverage") m.innerHTML = coverageTab();
+  if(activeTab==="Assistant") m.innerHTML = assistantTab();
   if(activeTab==="Census & FTE") m.innerHTML = censusTab();
   if(activeTab==="Trends & Budget") m.innerHTML = trendsTab();
   if(activeTab==="Roster") m.innerHTML = rosterTab();
@@ -1283,6 +1292,189 @@ function confirmImageImport(){
   render();
 }
 function discardImageImport(){ pendingImageImport = null; flashMessage = ""; render(); }
+
+/* ---- Assistant tab: the manager asks a question or describes a change in plain English, the
+   server calls a model which replies and, only when actually proposing a change, a small set of
+   typed actions. Chat history is intentionally NOT part of state (not in dataFields(), never
+   saved/synced) — it's a per-tab, per-browser scratchpad, same reasoning as why Undo history isn't
+   persisted either. Every action goes through the same confirm-before-commit shape as photo import:
+   nothing touches the real schedule until the manager clicks Apply on that specific message. ---- */
+let chatLog = []; // {role:"user"|"assistant", text, actions?, actionsApplied?}
+let chatBusy = false;
+const MAX_CHAT_LOG = 60;
+function scrollChatToBottom(){
+  if(activeTab!=="Assistant") return;
+  const el = document.getElementById("chatLogBox");
+  if(el) el.scrollTop = el.scrollHeight;
+}
+function buildChatContext(){
+  return {
+    today: todayISO(),
+    weekStart: state.weekStart, weekLabel: weekLabel(),
+    requirement: state.requirement, otThreshold: state.otThreshold, ratioTarget: state.ratioTarget,
+    holidays: state.holidays,
+    nurses: state.nurses.map(n=>({ name:n.name, role:n.role, fte:n.fte, cert:n.cert, preferredStart:fmtHour(n.pref), nightsYTD:n.nightsYTD, weekendsYTD:n.weekendsYTD, holidaysYTD:n.holidaysYTD, hoursThisWeek:weeklyHoursFor(n.id) })),
+    thisWeekShifts: DAYS.flatMap(d=>state.assignments.filter(a=>a.date===d).map(a=>({ nurse:nurse(a.nurseId)?.name||"?", date:d, start:fmtHour(a.start), end:fmtHour((a.start+a.duration)%24), hours:a.duration }))),
+    pendingRequests: state.requests.filter(r=>r.status==="pending").map(r=>({ nurse:nurse(r.nurseId)?.name||"?", date:r.date, type:r.type })),
+    approvedTimeOffThisWeek: state.requests.filter(r=>r.status==="approved" && (r.type==="PTO"||r.type==="Off") && DAYS.includes(r.date)).map(r=>({ nurse:nurse(r.nurseId)?.name||"?", date:r.date, type:r.type })),
+    censusThisWeek: DAYS.map(d=>({ date:d, ...(state.census[d]||{day:0,night:0}) })),
+  };
+}
+async function sendChatMessage(){
+  if(chatBusy) return;
+  const box = document.getElementById("chatInput");
+  const text = (box?.value||"").trim();
+  if(!text) return;
+  chatLog.push({role:"user", text});
+  if(chatLog.length>MAX_CHAT_LOG) chatLog = chatLog.slice(-MAX_CHAT_LOG);
+  chatBusy = true;
+  render();
+  try{
+    const res = await fetch("/api/chat", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        message: text,
+        history: chatLog.slice(0,-1).slice(-8).map(m=>({role:m.role, text:m.text})),
+        context: buildChatContext(),
+      }),
+    });
+    const body = await res.json();
+    if(!res.ok){
+      chatLog.push({role:"assistant", text: body.error || "Something went wrong talking to the assistant."});
+    } else {
+      chatLog.push({role:"assistant", text: body.reply || "(no reply)", actions: Array.isArray(body.actions)?body.actions:[]});
+    }
+  } catch(err){
+    chatLog.push({role:"assistant", text: `Couldn't reach the assistant (${err.message}).`});
+  }
+  chatBusy = false;
+  render();
+}
+function chatKeydown(ev){
+  if(ev.key==="Enter" && !ev.shiftKey){ ev.preventDefault(); sendChatMessage(); }
+}
+// Resolves one proposed action against the CURRENT live state (not the state the model saw, which
+// may be stale by the time the manager clicks Apply) — returns a human-readable label plus whether
+// it's actually safe to apply.
+function resolveChatAction(a){
+  const findNurse = name=>{
+    if(!name) return null;
+    const needle = String(name).trim().toLowerCase();
+    return state.nurses.find(x=>x.name.trim().toLowerCase()===needle)
+      || state.nurses.find(x=>x.name.trim().toLowerCase().includes(needle) || needle.includes(x.name.trim().toLowerCase()));
+  };
+  if(a.type==="add_shift"){
+    const n = findNurse(a.nurseName);
+    if(!n) return {ok:false, label:`Add shift: no nurse named "${esc(a.nurseName||"?")}" found`};
+    const start = Number(a.start), dur = Number(a.duration)||12;
+    if(!a.date || isNaN(start)) return {ok:false, label:`Add shift for ${esc(n.name)}: missing date or start time`};
+    let warn = "";
+    if(approvedPTO(n.id, a.date)) warn = " — blocked: approved time off that day";
+    else { const v = restViolation(n.id, a.date, start, dur); if(v==="overlap") warn=" — blocked: overlaps an existing shift"; else if(v==="rest") warn=" — warning: under 10hrs rest from an adjacent shift"; }
+    return { ok: !warn.includes("blocked"), label:`Add shift: ${esc(n.name)}, ${a.date} ${fmtHour(start)}–${fmtHour((start+dur)%24)}${warn}`,
+      apply:()=>{ state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:n.id, date:a.date, start, duration:dur}); } };
+  }
+  if(a.type==="remove_shift"){
+    const n = findNurse(a.nurseName);
+    if(!n) return {ok:false, label:`Remove shift: no nurse named "${esc(a.nurseName||"?")}" found`};
+    const start = Number(a.start);
+    const match = state.assignments.find(x=>x.nurseId===n.id && x.date===a.date && x.start===start);
+    if(!match) return {ok:false, label:`Remove shift: ${esc(n.name)} has no shift starting ${isNaN(start)?"?":fmtHour(start)} on ${a.date}`};
+    return { ok:true, label:`Remove shift: ${esc(n.name)}, ${a.date} ${fmtHour(match.start)}–${fmtHour((match.start+match.duration)%24)}`,
+      apply:()=>{ state.assignments = state.assignments.filter(x=>x.id!==match.id); } };
+  }
+  if(a.type==="time_off"){
+    const n = findNurse(a.nurseName);
+    if(!n) return {ok:false, label:`Time off: no nurse named "${esc(a.nurseName||"?")}" found`};
+    if(!a.startDate || !a.endDate) return {ok:false, label:`Time off for ${esc(n.name)}: missing dates`};
+    const dates = []; let d = a.startDate, guard=0;
+    while(d<=a.endDate && guard++<120){ dates.push(d); d = addDays(d,1); }
+    if(!dates.length) return {ok:false, label:`Time off for ${esc(n.name)}: invalid date range`};
+    const type = a.offType==="Off" ? "Off" : "PTO";
+    const clearing = state.assignments.filter(x=>x.nurseId===n.id && dates.includes(x.date)).length;
+    return { ok:true, label:`Time off: ${esc(n.name)}, ${a.startDate} → ${a.endDate} (${type}${clearing?`, clears ${clearing} existing shift${clearing===1?"":"s"}`:""})`,
+      apply:()=>{
+        state.assignments = state.assignments.filter(x=>!(x.nurseId===n.id && dates.includes(x.date)));
+        dates.forEach(dt=>{
+          const already = state.requests.some(r=>r.nurseId===n.id && r.date===dt && (r.type==="PTO"||r.type==="Off") && r.status==="approved");
+          if(!already) state.requests.push({id:"r"+Math.random().toString(36).slice(2), nurseId:n.id, date:dt, type, status:"approved"});
+        });
+      } };
+  }
+  if(a.type==="set_fte"){
+    const n = findNurse(a.nurseName);
+    if(!n) return {ok:false, label:`Set FTE: no nurse named "${esc(a.nurseName||"?")}" found`};
+    const fte = Number(a.fte);
+    if(isNaN(fte) || fte<0 || fte>2) return {ok:false, label:`Set FTE for ${esc(n.name)}: "${esc(a.fte)}" isn't a usable FTE value`};
+    return { ok:true, label:`Set FTE: ${esc(n.name)} ${n.fte} → ${fte}`, apply:()=>{ n.fte = fte; } };
+  }
+  if(a.type==="set_census"){
+    if(!a.date) return {ok:false, label:`Set census: missing date`};
+    const day = a.day==null?null:Number(a.day), night = a.night==null?null:Number(a.night);
+    if(day==null && night==null) return {ok:false, label:`Set census for ${a.date}: no day or night count given`};
+    const cur = state.census[a.date] || {day:0,night:0};
+    return { ok:true, label:`Set census: ${a.date} ${day!=null?`day ${cur.day}→${day}`:""}${day!=null&&night!=null?", ":""}${night!=null?`night ${cur.night}→${night}`:""}`,
+      apply:()=>{ state.census[a.date] = { day: day!=null?day:cur.day, night: night!=null?night:cur.night }; } };
+  }
+  return {ok:false, label:`Unrecognized action type "${esc(a.type)}"`};
+}
+function applyChatActions(msgIdx){
+  const msg = chatLog[msgIdx];
+  if(!msg || !msg.actions || msg.actionsApplied) return;
+  snapshot();
+  let applied = 0;
+  msg.actions.forEach(a=>{ const r = resolveChatAction(a); if(r.ok && r.apply){ r.apply(); applied++; } });
+  msg.actionsApplied = true;
+  flashMessage = applied ? `Applied ${applied} change${applied===1?"":"s"} from the assistant.` : "Nothing valid to apply, see the notes above.";
+  render();
+}
+function discardChatActions(msgIdx){
+  const msg = chatLog[msgIdx];
+  if(!msg) return;
+  msg.actionsApplied = true; // reuse the same flag to just hide the preview, nothing was applied
+  render();
+}
+function clearChat(){ chatLog = []; chatBusy = false; render(); }
+function assistantTab(){
+  if(persistMode!=="server"){
+    return `
+      <div class="panel">
+        <h2>Assistant</h2>
+        <p class="desc">Needs the Fly.io backend (it calls a model server-side, the same way photo import does). Not available on this copy — ${persistMode==="cloud"?"inside Claude's own viewer":persistMode==="local"?"opened standalone, no backend":"not connected"}.</p>
+      </div>`;
+  }
+  const bubbles = chatLog.map((m,i)=>{
+    if(m.role==="user"){
+      return `<div class="chat-msg chat-user"><div class="chat-bubble">${esc(m.text)}</div></div>`;
+    }
+    const actionsHTML = (m.actions && m.actions.length && !m.actionsApplied) ? (()=>{
+      const resolved = m.actions.map(resolveChatAction);
+      const okCount = resolved.filter(r=>r.ok).length;
+      return `<div class="flag warn block" style="margin-top:8px">
+        <div style="font-size:12px;line-height:1.7">${resolved.map(r=>`${r.ok?"✓":"✕"} ${r.label}`).join("<br>")}</div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" ${okCount?'':'disabled'} onclick="applyChatActions(${i})">Apply ${okCount} change${okCount===1?"":"s"}</button>
+          <button class="btn secondary" onclick="discardChatActions(${i})">Discard</button>
+        </div>
+      </div>`;
+    })() : (m.actions && m.actions.length && m.actionsApplied ? `<div class="pill" style="margin-top:6px;background:var(--border-soft);color:var(--ink-soft)">reviewed</div>` : "");
+    return `<div class="chat-msg chat-assistant"><div class="chat-bubble">${esc(m.text)}</div>${actionsHTML}</div>`;
+  }).join("") || `<p class="desc" style="padding:14px">Ask about the schedule ("who's working Saturday night"), or describe a change ("give Dawn Friday off", "Edward needs Oct 10–24 off"). Nothing changes until you review and apply it.</p>`;
+  return `
+    <div class="panel">
+      <h2>Assistant</h2>
+      <p class="desc">Talk to it like a coworker: ask questions, or describe what you want different. It proposes changes for you to review, nothing touches the real schedule until you hit Apply. It can add or remove shifts, mark someone off for a date range, update FTE, or correct a census number — for anything else (adding a nurse, changing role/cert) use the Roster tab directly.</p>
+      <div id="chatLogBox" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel-soft,transparent)">${bubbles}</div>
+      <div class="row" style="margin-top:10px;align-items:flex-start">
+        <textarea id="chatInput" rows="2" style="flex:1;resize:vertical" placeholder="e.g. Edward needs Oct 10 through Oct 24 off" onkeydown="chatKeydown(event)" ${chatBusy?'disabled':''}></textarea>
+        <button class="btn" onclick="sendChatMessage()" ${chatBusy?'disabled':''}>${chatBusy?"Thinking…":"Send"}</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn secondary" style="font-size:11px;padding:4px 9px" onclick="clearChat()" ${chatLog.length?'':'disabled'}>Clear conversation</button>
+      </div>
+    </div>`;
+}
+
 function addHoliday(){
   const v = document.getElementById("newHolidayDate").value;
   if(v && !state.holidays.includes(v)){ snapshot(); state.holidays.push(v); }
