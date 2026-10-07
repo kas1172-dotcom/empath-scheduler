@@ -699,8 +699,8 @@ function coverageTab(){
       <ul class="desc" style="margin:0 0 10px 18px;padding:0;list-style:disc;">
         <li>Checks every hour of each day/night band, not just the start, so a shorter shift that leaves a gap partway through still gets caught.</li>
         <li>Closes one gap at a time with a standard-length shift (8h if the gap is narrow, 12h if it spans more of the band) sized and placed to cover just that gap, instead of always stacking a full 12-hour shift from the band's start, which used to overstaff the band's easier hours.</li>
-        <li>Only considers nurses who are free: not already on shift, not on approved PTO, and rest-compliant (10+ hours since their last shift).</li>
-        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option), then shift-time preference match, then manager soft-priority for day-band gaps, then fewest hours already scheduled this week, then lowest equity score (least burden carried so far).</li>
+        <li>Only considers nurses who are free: not already on shift, not on approved PTO, rest-compliant (10+ hours since their last shift), and under a hard 60-hour weekly cap (only crossed if every eligible option for that specific gap is already past it, so a gap never goes unfilled over it, flagged in the summary when it happens).</li>
+        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option); for a night-band gap, fewest nights already carried (year-to-date plus this run) next, to actively rotate who takes nights rather than leaving it to chance; then shift-time preference match; then fewest hours already scheduled this week; then lowest equity score (least burden carried so far). There's no manager-coverage rule — a shift doesn't need a manager on it, managers are ranked the same as anyone else.</li>
         <li>Swaps in a certified nurse for the gap it's filling if no one already covering that window is certified.</li>
       </ul>
       <div class="row">
@@ -868,7 +868,15 @@ function runAutoFill(){
   // which sits just outside the week on screen. Plan that night band too, counting only the hours that land in this week.
   const plan = [{d:addDays(DAYS[0],-1), b:bands[1], weekOnly:true}];
   DAYS.forEach(d=>bands.forEach(b=>plan.push({d,b,weekOnly:false})));
-  let added = 0, addedBefore = 0, uncoverable = 0;
+  let added = 0, addedBefore = 0, uncoverable = 0, capOverridden = 0;
+  const nightsThisRun = {}; // nurseId -> night-band shifts added so far in this run, for fair-rotation ranking below
+  // Hard safety ceiling on top of the OT threshold's soft tie-break: without this, a nurse who keeps
+  // winning the ranking (best preference match, fewest hours *before* this run started, etc.) can get
+  // picked for gap after gap in the same run and end up stacked to 70+ hours in one week. 60h/week is
+  // a standard outer bound in shift-scheduling fatigue guidance; it's enforced here as a filter, with a
+  // fallback to override it only when literally nobody else is free, so a gap never silently goes
+  // unfilled because of it.
+  const HARD_WEEKLY_CAP = 60;
   plan.forEach(({d,b,weekOnly})=>{
     // The band's 12 real (date,hour) cells, trimmed to this week when weekOnly is set. Built once;
     // coverage within it is re-read live on every pass below so a shift just added in this band
@@ -904,7 +912,7 @@ function runAutoFill(){
       const startIdx = Math.max(0, Math.min(lo, cells.length-span));
       const startCell = cells[startIdx];
 
-      const eligible = state.nurses.filter(n=>{
+      let eligible = state.nurses.filter(n=>{
         if(n.role==="Aide") return false; // aides self-schedule, auto-fill doesn't touch their coverage
         if(approvedPTO(n.id, startCell.date)) return false;
         if(restViolation(n.id, startCell.date, startCell.hour, span)) return false; // also catches overlap with an existing shift
@@ -912,12 +920,22 @@ function runAutoFill(){
       });
       if(!eligible.length){ uncoverable++; break; } // nobody left who can take this gap, stop and let the summary report it
 
+      const underCap = eligible.filter(n=>weeklyHoursFor(n.id)+span<=HARD_WEEKLY_CAP);
+      if(underCap.length) eligible = underCap;
+      else capOverridden++; // every remaining option would cross 60h/week — fill it anyway rather than leave the gap open
+
       eligible.sort((a,c)=>{
         const consA = consecutiveDaysWorked(a.id, startCell.date)>=3 ? 1:0, consC = consecutiveDaysWorked(c.id, startCell.date)>=3 ? 1:0;
         if(consA!==consC) return consA-consC; // fatigue guard: 3-in-a-row goes last, never excluded outright
+        // Night-band gaps rank by who's carried the fewest nights (YTD plus whatever this run has
+        // already handed them), ahead of preference match — the direct lever for "fairly distribute
+        // night shifts" rather than leaving it to equityScore's broader, lower-weighted mix.
+        if(b.label==="night"){
+          const nightsA = (a.nightsYTD||0)+(nightsThisRun[a.id]||0), nightsC = (c.nightsYTD||0)+(nightsThisRun[c.id]||0);
+          if(nightsA!==nightsC) return nightsA-nightsC;
+        }
         const prefA = Math.abs(a.pref-b.start)<=2 ? 0:1, prefC = Math.abs(c.pref-b.start)<=2 ? 0:1;
         if(prefA!==prefC) return prefA-prefC;
-        if(b.label==="day"){ const mgrA = a.role==="Manager"?0:1, mgrC = c.role==="Manager"?0:1; if(mgrA!==mgrC) return mgrA-mgrC; }
         const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
         if(hoursA!==hoursC) return hoursA-hoursC;
         return equityScore(a)-equityScore(c);
@@ -935,6 +953,7 @@ function runAutoFill(){
 
       state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:pick.id, date:startCell.date, start:startCell.hour, duration:span});
       added++; if(weekOnly) addedBefore++;
+      if(b.label==="night") nightsThisRun[pick.id] = (nightsThisRun[pick.id]||0)+1;
     }
   });
   const shortAfter = shortHoursInWeek();
@@ -945,6 +964,7 @@ function runAutoFill(){
     + (shortAfter
       ? `${hrs(shortAfter)} still below requirement: nobody is free for them (approved time off, rest rules, or already on shift). Add coverage by hand, or lower the requirement. `
       : `Every nurse hour this week now meets the requirement. `)
+    + (capOverridden ? `${capOverridden} shift${capOverridden===1?"":"s"} had to cross the 60h/week safety cap anyway, because every eligible nurse for that gap was already past it. Check those by hand. ` : "")
     + `Aide coverage isn't touched by auto-fill.`;
   render();
 }
