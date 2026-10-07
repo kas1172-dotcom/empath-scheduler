@@ -61,6 +61,14 @@
   .chat-user .chat-bubble{ background:var(--purple); color:#fff; }
   .chat-assistant .chat-bubble{ background:var(--border-soft); color:var(--ink); }
   .chat-msg.chat-assistant > div{ max-width:100%; }
+  #chatWidget{ position:fixed; right:20px; bottom:20px; z-index:40; display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+  .chat-fab{ position:relative; width:52px; height:52px; border-radius:50%; border:none; background:var(--purple); color:#fff; font-size:22px; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.2); display:flex; align-items:center; justify-content:center; }
+  .chat-fab:hover{ filter:brightness(1.06); }
+  .chat-fab-dot{ position:absolute; top:2px; right:2px; width:11px; height:11px; border-radius:50%; background:var(--rust); border:2px solid var(--panel); }
+  .chat-float-panel{ width:380px; max-width:calc(100vw - 32px); max-height:min(70vh,560px); display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:0 10px 32px rgba(0,0,0,.22); overflow:hidden; }
+  .chat-float-header{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); font-size:13px; }
+  .chat-float-body{ padding:12px 14px; overflow-y:auto; }
+  @media (max-width:480px){ #chatWidget{ right:12px; bottom:12px; } .chat-float-panel{ width:calc(100vw - 24px); } }
   button.btn{ font:inherit; padding:7px 13px; border-radius:4px; border:1px solid var(--purple); background:var(--purple); color:#fff; cursor:pointer; font-weight:600; font-size:12.5px; }
   button.btn.secondary{ background:transparent; color:var(--purple); }
   button.btn.danger{ background:var(--rust); border-color:var(--rust); color:#fff; }
@@ -185,11 +193,19 @@
 
 <nav id="tabs"></nav>
 <main id="main"></main>
+<div id="chatWidget" class="no-print"></div>
 
 <script>
 /* ============ STATE ============ */
-const WEEK_START = "2026-09-14"; // default starting week
 function weekDays(start){ return Array.from({length:7}, (_,i)=>addDays(start,i)); }
+function currentWeekStartISO(){
+  // Monday of the current week, in the browser's local time — used as the default
+  // week whenever there's no saved state yet, so a fresh load always opens on "this week"
+  // instead of a date that gets staler every day.
+  const dow = (new Date(todayISO()+"T00:00:00").getDay()+6)%7; // Monday-start index
+  return addDays(todayISO(), -dow);
+}
+const WEEK_START = currentWeekStartISO(); // default starting week (today's Monday)
 let DAYS = weekDays(WEEK_START);
 const DAY_NAMES = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
@@ -220,7 +236,7 @@ let state = {
   ratioTarget: 5,
   censusViewMode: "week",
   budget: { rnWage:48, mgrWage:58, diffPct:10, holidayDiffPct:50, weeklyTarget:14000 },
-  printOpts: { format:"grid", orientation:"portrait", includeRole:true, includeOT:true, includeHoliday:true, note:"" },
+  printOpts: { format:"grid", orientation:"portrait", range:"1week", includeRole:true, includeOT:true, includeHoliday:true, note:"" },
   census: {
     [DAYS[0]]:{day:0,night:0}, [DAYS[1]]:{day:0,night:0}, [DAYS[2]]:{day:0,night:0},
     [DAYS[3]]:{day:0,night:0}, [DAYS[4]]:{day:0,night:0}, [DAYS[5]]:{day:0,night:0}, [DAYS[6]]:{day:0,night:0},
@@ -232,20 +248,20 @@ let state = {
   // with the spreadsheet or photo import on the Census & FTE tab, build weeks going forward in
   // Coverage, and let real census come from there or from staff submitting it in the Employee portal.
   nurses: [
-    {id:"n1", name:"Laurie Swift",     role:"Manager", fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n2", name:"Anthony Trocano",  role:"Manager", fte:1.0, cert:true,  pref:19, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n3", name:"Christine Davis",  role:"RN",      fte:1.0, cert:true,  pref:9,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n4", name:"Kimberly Fritz",   role:"RN",      fte:1.0, cert:true,  pref:12, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n5", name:"Mary Ronca",       role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n6", name:"Dawn Erickson",    role:"RN",      fte:1.0, cert:false, pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n7", name:"Edward Earvin",    role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n8", name:"Arnetta Sciulli",  role:"RN",      fte:0.5, cert:false, pref:21, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n9", name:"Dyan Conaway",     role:"RN",      fte:1.0, cert:true,  pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n10",name:"Christina Stevens",role:"RN",      fte:1.0, cert:true,  pref:21, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n11",name:"Faith Ndiga",      role:"RN",      fte:0.5, cert:false, pref:7,  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"p1", name:"Hemant Thapa", role:"Aide", fte:1.0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"p2", name:"Kapil Sharma", role:"Aide", fte:0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"p3", name:"General Sitter (pool, fills gaps)", role:"Aide", fte:0, cert:false, pref:6, nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n1", name:"Laurie Swift",     role:"Manager", fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n2", name:"Anthony Trocano",  role:"Manager", fte:1.0, cert:true,  prefs:[19], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n3", name:"Christine Davis",  role:"RN",      fte:1.0, cert:true,  prefs:[9],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n4", name:"Kimberly Fritz",   role:"RN",      fte:1.0, cert:true,  prefs:[12], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n5", name:"Mary Ronca",       role:"RN",      fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n6", name:"Dawn Erickson",    role:"RN",      fte:1.0, cert:false, prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n7", name:"Edward Earvin",    role:"RN",      fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n8", name:"Arnetta Sciulli",  role:"RN",      fte:0.5, cert:false, prefs:[21], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n9", name:"Dyan Conaway",     role:"RN",      fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n10",name:"Christina Stevens",role:"RN",      fte:1.0, cert:true,  prefs:[21], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"n11",name:"Faith Ndiga",      role:"RN",      fte:0.5, cert:false, prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p1", name:"Hemant Thapa", role:"Aide", fte:1.0, cert:false, prefs:[6], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p2", name:"Kapil Sharma", role:"Aide", fte:0, cert:false, prefs:[6], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
+    {id:"p3", name:"General Sitter (pool, fills gaps)", role:"Aide", fte:0, cert:false, prefs:[6], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
   ],
   assignments: [],
   requests: [],
@@ -462,6 +478,14 @@ function ensureXLSX(){
   return xlsxLoadPromise;
 }
 function nurse(id){ return state.nurses.find(n=>n.id===id); }
+// A nurse can have more than one preferred start time (e.g. flexible between 7a and 11a).
+// `prefs` (array) is the current schema; `pref` (single number) is kept read-only for any
+// state saved before this existed and gets folded in here rather than migrated in place,
+// so old server/localStorage snapshots keep working without a one-time conversion step.
+function nursePrefs(n){
+  if(Array.isArray(n.prefs)) return n.prefs;
+  return n.pref!=null ? [n.pref] : [];
+}
 function isWeekend(iso){ const day = new Date(iso+"T00:00:00").getDay(); return day===0 || day===6; }
 function isHoliday(iso){ return state.holidays.includes(iso); }
 
@@ -508,7 +532,8 @@ function avgStaffForBand(dateISO, startH, lenH){
   for(let i=0;i<lenH;i++) total += cov[(startH+i)%24];
   return total/lenH;
 }
-function weeklyHoursFor(nurseId){ return state.assignments.filter(a=>a.nurseId===nurseId && DAYS.includes(a.date)).reduce((s,a)=>s+a.duration,0); }
+function hoursForDays(nurseId, days){ return state.assignments.filter(a=>a.nurseId===nurseId && days.includes(a.date)).reduce((s,a)=>s+a.duration,0); }
+function weeklyHoursFor(nurseId){ return hoursForDays(nurseId, DAYS); }
 function requiredFTE(){
   let totalHours=0;
   DAYS.forEach(()=>{ for(let h=0;h<24;h++) totalHours += requiredForHour(h); });
@@ -552,7 +577,7 @@ function scoreBreakdown(n){
 function equityScore(n){ return scoreBreakdown(n).reduce((s,x)=>s+x.points,0); }
 
 /* ============ RENDER ============ */
-const TABS = ["Coverage","Assistant","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
+const TABS = ["Coverage","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
 let activeTab = "Coverage";
 
 function render(){
@@ -564,16 +589,17 @@ function render(){
   renderNav();
   renderMain();
   renderImageImportPreview();
+  renderChatWidget();
   scrollChatToBottom();
 }
 function shiftWeek(n){ state.weekStart = addDays(state.weekStart, 7*n); render(); }
-function weekLabel(){
-  const end = addDays(state.weekStart,6);
-  return `${state.weekStart} – ${end}`;
+function weekLabel(){ return weekLabelFor(state.weekStart); }
+function weekLabelFor(start){
+  const end = addDays(start,6);
+  return `${start} – ${end}`;
 }
 function jumpToCurrentWeek(){
-  const dow = (new Date(todayISO()+"T00:00:00").getDay()+6)%7; // Monday-start index
-  state.weekStart = addDays(todayISO(), -dow);
+  state.weekStart = currentWeekStartISO();
   render();
 }
 function weekNavControlHTML(){
@@ -621,7 +647,6 @@ function renderMain(){
   const m = document.getElementById("main");
   if(state.mode==="employee"){ m.innerHTML = employeePortal(); return; }
   if(activeTab==="Coverage") m.innerHTML = coverageTab();
-  if(activeTab==="Assistant") m.innerHTML = assistantTab();
   if(activeTab==="Census & FTE") m.innerHTML = censusTab();
   if(activeTab==="Trends & Budget") m.innerHTML = trendsTab();
   if(activeTab==="Roster") m.innerHTML = rosterTab();
@@ -677,8 +702,10 @@ function coverageTab(){
       </div>
       <div id="addShiftForm"></div>
       <div class="row" style="margin-top:14px;">
+        <button class="btn" onclick="runAutoFill()">Auto-fill gaps</button>
         <button class="btn secondary" onclick="exportShiftsFile()">Export shifts (.xlsx)</button>
       </div>
+      ${autoFillNote ? `<div class="flag warn block" style="margin-top:10px">${autoFillNote}</div>` : ""}
       <div id="exportResult" style="margin-top:8px"></div>
     </div>
 
@@ -936,21 +963,26 @@ function runAutoFill(){
       eligible.sort((a,c)=>{
         const consA = consecutiveDaysWorked(a.id, startCell.date)>=3 ? 1:0, consC = consecutiveDaysWorked(c.id, startCell.date)>=3 ? 1:0;
         if(consA!==consC) return consA-consC; // fatigue guard: 3-in-a-row goes last, never excluded outright
-        // Fewest hours already scheduled this week is the PRIMARY ranking lever, ahead of preference.
-        // Preference-first (the old order) let anyone whose preferred start matched a band keep
-        // winning gap after gap as their hours climbed into OT, while someone whose preference didn't
-        // match sat at zero all week even with nothing else scheduled — exactly backwards for fair
-        // distribution. Hours-first means load actually levels out across the roster before anyone's
-        // preference tips the balance.
-        const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
-        if(hoursA!==hoursC) return hoursA-hoursC;
+        // Lowest fraction of a full FTE load already scheduled this week is the PRIMARY ranking
+        // lever, ahead of preference. Preference-first (the old order) let anyone whose preferred
+        // start matched a band keep winning gap after gap as their hours climbed into OT, while
+        // someone whose preference didn't match sat at zero all week even with nothing else
+        // scheduled — exactly backwards for fair distribution. Load-ratio-first means hours level
+        // out relative to each nurse's own appointed FTE before anyone's preference tips the
+        // balance — a 0.5 FTE nurse at 20hrs (their full expected load) ranks as "full" right
+        // alongside a 1.0 FTE nurse at 40hrs, instead of still looking "under-worked" by raw hours
+        // and absorbing gaps a full-timer should be getting. FTE is read live off the current
+        // roster every run, so changing someone's FTE in Roster changes who gets picked next time.
+        const fteA = a.fte>0 ? a.fte : 0.1, fteC = c.fte>0 ? c.fte : 0.1;
+        const loadA = weeklyHoursFor(a.id)/(fteA*state.otThreshold), loadC = weeklyHoursFor(c.id)/(fteC*state.otThreshold);
+        if(loadA!==loadC) return loadA-loadC;
         // Among nurses at the same hours, a night-band gap still rotates by who's carried the fewest
         // nights (YTD plus whatever this run has already handed them) before preference.
         if(b.label==="night"){
           const nightsA = (a.nightsYTD||0)+(nightsThisRun[a.id]||0), nightsC = (c.nightsYTD||0)+(nightsThisRun[c.id]||0);
           if(nightsA!==nightsC) return nightsA-nightsC;
         }
-        const prefA = Math.abs(a.pref-b.start)<=2 ? 0:1, prefC = Math.abs(c.pref-b.start)<=2 ? 0:1;
+        const prefA = nursePrefs(a).some(p=>Math.abs(p-b.start)<=2) ? 0:1, prefC = nursePrefs(c).some(p=>Math.abs(p-b.start)<=2) ? 0:1;
         if(prefA!==prefC) return prefA-prefC;
         return equityScore(a)-equityScore(c);
       });
@@ -1298,17 +1330,19 @@ function confirmImageImport(){
 }
 function discardImageImport(){ pendingImageImport = null; flashMessage = ""; render(); }
 
-/* ---- Assistant tab: the manager asks a question or describes a change in plain English, the
-   server calls a model which replies and, only when actually proposing a change, a small set of
-   typed actions. Chat history is intentionally NOT part of state (not in dataFields(), never
-   saved/synced) — it's a per-tab, per-browser scratchpad, same reasoning as why Undo history isn't
-   persisted either. Every action goes through the same confirm-before-commit shape as photo import:
-   nothing touches the real schedule until the manager clicks Apply on that specific message. ---- */
+/* ---- Assistant: a floating chat bubble (bottom-right, manager mode only), not a tab, so it stays
+   reachable from wherever the manager is working. The manager asks a question or describes a
+   change in plain English, the server calls a model which replies and, only when actually
+   proposing a change, a small set of typed actions. Chat history is intentionally NOT part of
+   state (not in dataFields(), never saved/synced) — it's a per-browser scratchpad, same reasoning
+   as why Undo history isn't persisted either. Every action goes through the same confirm-before-
+   commit shape as photo import: nothing touches the real schedule until the manager clicks Apply
+   on that specific message. ---- */
 let chatLog = []; // {role:"user"|"assistant", text, actions?, actionsApplied?}
 let chatBusy = false;
 const MAX_CHAT_LOG = 60;
 function scrollChatToBottom(){
-  if(activeTab!=="Assistant") return;
+  if(!chatOpen) return;
   const el = document.getElementById("chatLogBox");
   if(el) el.scrollTop = el.scrollHeight;
 }
@@ -1318,7 +1352,7 @@ function buildChatContext(){
     weekStart: state.weekStart, weekLabel: weekLabel(),
     requirement: state.requirement, otThreshold: state.otThreshold, ratioTarget: state.ratioTarget,
     holidays: state.holidays,
-    nurses: state.nurses.map(n=>({ name:n.name, role:n.role, fte:n.fte, cert:n.cert, preferredStart:fmtHour(n.pref), nightsYTD:n.nightsYTD, weekendsYTD:n.weekendsYTD, holidaysYTD:n.holidaysYTD, hoursThisWeek:weeklyHoursFor(n.id) })),
+    nurses: state.nurses.map(n=>({ name:n.name, role:n.role, fte:n.fte, cert:n.cert, preferredStarts:nursePrefs(n).map(fmtHour), nightsYTD:n.nightsYTD, weekendsYTD:n.weekendsYTD, holidaysYTD:n.holidaysYTD, hoursThisWeek:weeklyHoursFor(n.id) })),
     thisWeekShifts: DAYS.flatMap(d=>state.assignments.filter(a=>a.date===d).map(a=>({ nurse:nurse(a.nurseId)?.name||"?", date:d, start:fmtHour(a.start), end:fmtHour((a.start+a.duration)%24), hours:a.duration }))),
     pendingRequests: state.requests.filter(r=>r.status==="pending").map(r=>({ nurse:nurse(r.nurseId)?.name||"?", date:r.date, type:r.type })),
     approvedTimeOffThisWeek: state.requests.filter(r=>r.status==="approved" && (r.type==="PTO"||r.type==="Off") && DAYS.includes(r.date)).map(r=>({ nurse:nurse(r.nurseId)?.name||"?", date:r.date, type:r.type })),
@@ -1440,13 +1474,15 @@ function discardChatActions(msgIdx){
   render();
 }
 function clearChat(){ chatLog = []; chatBusy = false; render(); }
-function assistantTab(){
+// The assistant lives in a floating bubble (bottom-right, every manager tab) rather than its own
+// tab, so a manager can ask it something without losing their place in Coverage/Roster/whatever
+// they're looking at. chatOpen is UI-only state, same non-persisted reasoning as chatLog itself.
+let chatOpen = false;
+function toggleChatWidget(){ chatOpen = !chatOpen; flashMessage=""; render(); }
+function closeChatWidget(){ chatOpen = false; render(); }
+function chatPanelBodyHTML(){
   if(persistMode!=="server"){
-    return `
-      <div class="panel">
-        <h2>Assistant</h2>
-        <p class="desc">Needs the Fly.io backend (it calls a model server-side, the same way photo import does). Not available on this copy — ${persistMode==="cloud"?"inside Claude's own viewer":persistMode==="local"?"opened standalone, no backend":"not connected"}.</p>
-      </div>`;
+    return `<p class="desc" style="padding:14px 4px">Needs the Fly.io backend (it calls a model server-side, the same way photo import does). Not available on this copy — ${persistMode==="cloud"?"inside Claude's own viewer":persistMode==="local"?"opened standalone, no backend":"not connected"}.</p>`;
   }
   const bubbles = chatLog.map((m,i)=>{
     if(m.role==="user"){
@@ -1464,20 +1500,34 @@ function assistantTab(){
       </div>`;
     })() : (m.actions && m.actions.length && m.actionsApplied ? `<div class="pill" style="margin-top:6px;background:var(--border-soft);color:var(--ink-soft)">reviewed</div>` : "");
     return `<div class="chat-msg chat-assistant"><div class="chat-bubble">${esc(m.text)}</div>${actionsHTML}</div>`;
-  }).join("") || `<p class="desc" style="padding:14px">Ask about the schedule ("who's working Saturday night"), or describe a change ("give Dawn Friday off", "Edward needs Oct 10–24 off"). Nothing changes until you review and apply it.</p>`;
+  }).join("") || `<p class="desc" style="padding:14px 4px">Ask about the schedule ("who's working Saturday night"), or describe a change ("give Dawn Friday off", "Edward needs Oct 10–24 off"). Nothing changes until you review and apply it.</p>`;
   return `
-    <div class="panel">
-      <h2>Assistant</h2>
-      <p class="desc">Talk to it like a coworker: ask questions, or describe what you want different. It proposes changes for you to review, nothing touches the real schedule until you hit Apply. It can add or remove shifts, mark someone off for a date range, update FTE, or correct a census number — for anything else (adding a nurse, changing role/cert) use the Roster tab directly.</p>
-      <div id="chatLogBox" style="max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel-soft,transparent)">${bubbles}</div>
-      <div class="row" style="margin-top:10px;align-items:flex-start">
-        <textarea id="chatInput" rows="2" style="flex:1;resize:vertical" placeholder="e.g. Edward needs Oct 10 through Oct 24 off" onkeydown="chatKeydown(event)" ${chatBusy?'disabled':''}></textarea>
-        <button class="btn" onclick="sendChatMessage()" ${chatBusy?'disabled':''}>${chatBusy?"Thinking…":"Send"}</button>
-      </div>
-      <div class="row" style="margin-top:6px">
-        <button class="btn secondary" style="font-size:11px;padding:4px 9px" onclick="clearChat()" ${chatLog.length?'':'disabled'}>Clear conversation</button>
-      </div>
+    <p class="desc" style="margin:0 0 8px">Talk to it like a coworker: ask questions, or describe what you want different. It proposes changes for you to review, nothing touches the real schedule until you hit Apply. It can add or remove shifts, mark someone off for a date range, update FTE, or correct a census number — for anything else (adding a nurse, changing role/cert) use the Roster tab directly.</p>
+    <div id="chatLogBox" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel-soft,transparent)">${bubbles}</div>
+    <div class="row" style="margin-top:10px;align-items:flex-start">
+      <textarea id="chatInput" rows="2" style="flex:1;resize:vertical" placeholder="e.g. Edward needs Oct 10 through Oct 24 off" onkeydown="chatKeydown(event)" ${chatBusy?'disabled':''}></textarea>
+      <button class="btn" onclick="sendChatMessage()" ${chatBusy?'disabled':''}>${chatBusy?"…":"Send"}</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button class="btn secondary" style="font-size:11px;padding:4px 9px" onclick="clearChat()" ${chatLog.length?'':'disabled'}>Clear conversation</button>
     </div>`;
+}
+function renderChatWidget(){
+  const el = document.getElementById("chatWidget");
+  if(!el) return;
+  if(state.mode==="employee"){ el.innerHTML=""; return; } // manager-only, same as the old tab
+  const pendingDot = (!chatOpen && chatLog.some(m=>m.role==="assistant" && m.actions && m.actions.length && !m.actionsApplied)) ? `<span class="chat-fab-dot"></span>` : "";
+  el.innerHTML = `
+    ${chatOpen ? `
+      <div class="chat-float-panel">
+        <div class="chat-float-header">
+          <strong>Assistant</strong>
+          <button class="icon-btn" onclick="closeChatWidget()" title="Close">✕</button>
+        </div>
+        <div class="chat-float-body">${chatPanelBodyHTML()}</div>
+      </div>` : ""}
+    <button class="chat-fab" onclick="toggleChatWidget()" title="${chatOpen?'Close assistant':'Open assistant'}">${chatOpen ? "✕" : "💬"}${pendingDot}</button>
+  `;
 }
 
 function addHoliday(){
@@ -1703,7 +1753,7 @@ function rosterTab(){
       <td><select onchange="updateNurse('${n.id}','role',this.value)">${["RN","MHRN","Manager","Aide","Other"].map(r=>`<option ${n.role===r?'selected':''}>${r}</option>`).join("")}</select></td>
       <td><input type="number" step="0.1" min="0" max="1" value="${n.fte}" style="width:60px" onchange="updateNurse('${n.id}','fte',Number(this.value))"></td>
       <td><input type="checkbox" ${n.cert?'checked':''} onchange="updateNurse('${n.id}','cert',this.checked)"></td>
-      <td><select onchange="updateNurse('${n.id}','pref',Number(this.value))">${[7,9,11,19,21,23].map(h=>`<option value="${h}" ${n.pref===h?'selected':''}>${fmtHour(h)} start</option>`).join("")}</select></td>
+      <td><div style="display:flex;flex-wrap:wrap;gap:4px;max-width:170px">${[7,9,11,19,21,23].map(h=>`<label style="font-size:11px;display:inline-flex;align-items:center;gap:2px;border:1px solid var(--border);border-radius:4px;padding:1px 5px;cursor:pointer;white-space:nowrap"><input type="checkbox" style="margin:0" ${nursePrefs(n).includes(h)?'checked':''} onchange="toggleNursePref('${n.id}',${h})">${fmtHour(h)}</label>`).join("")}</div></td>
       <td>${weeklyHoursFor(n.id)} hrs</td>
       <td>${confirmingRemoveId===n.id
         ? `<button class="btn danger" style="padding:3px 7px;font-size:11px" onclick="confirmRemoveYes('${n.id}')">Confirm</button> <button class="btn secondary" style="padding:3px 7px;font-size:11px" onclick="confirmRemoveNo()">Cancel</button>`
@@ -1721,13 +1771,23 @@ function rosterTab(){
     </div>`;
 }
 function updateNurse(id,field,val){ snapshot(); nurse(id)[field]=val; render(); }
+function toggleNursePref(id,hour){
+  snapshot();
+  const n = nurse(id);
+  const cur = nursePrefs(n).slice();
+  const idx = cur.indexOf(hour);
+  if(idx>=0) cur.splice(idx,1); else cur.push(hour);
+  n.prefs = cur;
+  delete n.pref; // fully migrated to the array field once edited here
+  render();
+}
 function removeNurse(id){ confirmingRemoveId=id; render(); }
 function confirmRemoveYes(id){ snapshot(); state.nurses = state.nurses.filter(n=>n.id!==id); state.assignments = state.assignments.filter(a=>a.nurseId!==id); confirmingRemoveId=null; render(); }
 function confirmRemoveNo(){ confirmingRemoveId=null; render(); }
 function addNurse(){
   snapshot();
   const id="n"+Math.random().toString(36).slice(2);
-  state.nurses.push({id,name:"New nurse",role:"RN",fte:1.0,cert:false,pref:7,nightsYTD:0,weekendsYTD:0,holidaysYTD:0,calloffs:0,ptoHonored:0,ptoDenied:0,prefHonored:0,prefDenied:0});
+  state.nurses.push({id,name:"New nurse",role:"RN",fte:1.0,cert:false,prefs:[7],nightsYTD:0,weekendsYTD:0,holidaysYTD:0,calloffs:0,ptoHonored:0,ptoDenied:0,prefHonored:0,prefDenied:0});
   render();
 }
 
@@ -2002,41 +2062,54 @@ function assignReplacement(assignmentId, nurseId){
 
 /* ---- Print tab ---- */
 function setPrintOpt(field,val){ state.printOpts[field]=val; render(); }
-function printGridHTML(){
+function printWeekStarts(){
+  // One week by default; "2weeks" prints state.weekStart's week plus the one immediately after it,
+  // so a manager can hand out or post two weeks of schedule in a single print job.
+  return state.printOpts.range==="2weeks" ? [state.weekStart, addDays(state.weekStart,7)] : [state.weekStart];
+}
+function printGridWeekHTML(wkStart, pageBreakAfter){
+  const days = weekDays(wkStart);
   const note = state.printOpts.note;
-  const headerCells = DAYS.map((d,i)=>{
+  const headerCells = days.map((d,i)=>{
     const hol = state.printOpts.includeHoliday && isHoliday(d) ? " ★" : "";
     return `<th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">${DAY_NAMES[i]} ${d.slice(5)}${hol}</th>`;
   }).join("");
   const rows = state.nurses.map(n=>{
-    const hrs = weeklyHoursFor(n.id);
+    const hrs = hoursForDays(n.id, days);
     const otBadge = (state.printOpts.includeOT && hrs>state.otThreshold) ? ` (OT +${hrs-state.otThreshold}h)` : "";
     const roleTxt = state.printOpts.includeRole ? `, ${n.role}` : "";
-    const cells = DAYS.map(d=>{
+    const cells = days.map(d=>{
       const shifts = state.assignments.filter(a=>a.nurseId===n.id && a.date===d).sort((a,b)=>a.start-b.start);
       return `<td style="border:1px solid #999;padding:4px 6px;font-size:11px;vertical-align:top">${shifts.map(a=>`${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)}`).join("<br>")}</td>`;
     }).join("");
     return `<tr><td style="border:1px solid #999;padding:4px 6px;font-size:11px;font-weight:600;white-space:nowrap">${esc(n.name)}${roleTxt}${otBadge}</td>${cells}</tr>`;
   }).join("");
   return `
-    <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
-    <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabel()}${note?` — ${note}`:""}</p>
-    <div class="print-scroll"><table style="border-collapse:collapse;width:100%">
-      <thead><tr><th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Nurse</th>${headerCells}</tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-    ${state.printOpts.includeHoliday && state.holidays.some(h=>DAYS.includes(h)) ? `<p style="font-size:10px;color:#666;margin-top:8px">★ = configured holiday</p>` : ""}
+    <div style="${pageBreakAfter?'page-break-after:always;':''}">
+      <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
+      <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabelFor(wkStart)}${note?` — ${note}`:""}</p>
+      <div class="print-scroll"><table style="border-collapse:collapse;width:100%">
+        <thead><tr><th style="border:1px solid #999;padding:4px 6px;font-size:11px;text-align:left">Nurse</th>${headerCells}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${state.printOpts.includeHoliday && state.holidays.some(h=>days.includes(h)) ? `<p style="font-size:10px;color:#666;margin-top:8px">★ = configured holiday</p>` : ""}
+    </div>
   `;
 }
-function printListHTML(){
+function printGridHTML(){
+  const starts = printWeekStarts();
+  return starts.map((wk,i)=>printGridWeekHTML(wk, i<starts.length-1)).join("");
+}
+function printListWeekHTML(wkStart, pageBreakAfter){
+  const days = weekDays(wkStart);
   const note = state.printOpts.note;
-  const sections = DAYS.map((d,i)=>{
+  const sections = days.map((d,i)=>{
     const shifts = state.assignments.filter(a=>a.date===d).sort((a,b)=>a.start-b.start);
     const hol = state.printOpts.includeHoliday && isHoliday(d) ? " (Holiday)" : "";
     const rows = shifts.map(a=>{
       const n = nurse(a.nurseId); if(!n) return "";
       const roleTxt = state.printOpts.includeRole ? ` (${n.role})` : "";
-      const hrs = weeklyHoursFor(n.id);
+      const hrs = hoursForDays(n.id, days);
       const otBadge = (state.printOpts.includeOT && hrs>state.otThreshold) ? " [OT]" : "";
       return `<div style="font-size:12px;padding:2px 0">${fmtHour(a.start)}–${fmtHour((a.start+a.duration)%24)} — ${esc(n.name)}${roleTxt}${otBadge}</div>`;
     }).join("") || `<div style="font-size:12px;color:#888">No shifts scheduled.</div>`;
@@ -2046,10 +2119,16 @@ function printListHTML(){
     </div>`;
   }).join("");
   return `
-    <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
-    <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabel()}${note?` — ${note}`:""}</p>
-    ${sections}
+    <div style="${pageBreakAfter?'page-break-after:always;':''}">
+      <h2 style="margin:0 0 4px">EMPATH Unit — Weekly Schedule</h2>
+      <p style="margin:0 0 12px;color:#444;font-size:12px">${weekLabelFor(wkStart)}${note?` — ${note}`:""}</p>
+      ${sections}
+    </div>
   `;
+}
+function printListHTML(){
+  const starts = printWeekStarts();
+  return starts.map((wk,i)=>printListWeekHTML(wk, i<starts.length-1)).join("");
 }
 function printCensusHistoryHTML(){
   const buckets = state.censusViewMode==="month" ? censusByMonth() : censusByWeek();
@@ -2096,6 +2175,10 @@ function printTab(){
           <option value="portrait" ${state.printOpts.orientation==='portrait'?'selected':''}>Portrait</option>
           <option value="landscape" ${state.printOpts.orientation==='landscape'?'selected':''}>Landscape</option>
         </select></div>
+        ${fmt!=='census' ? `<div><label>Range</label><select onchange="setPrintOpt('range',this.value)">
+          <option value="1week" ${state.printOpts.range==='1week'?'selected':''}>This week only</option>
+          <option value="2weeks" ${state.printOpts.range==='2weeks'?'selected':''}>This week + next (2 weeks)</option>
+        </select></div>` : ''}
       </div>
       ${fmt==='census' ? `<div class="row" style="margin-top:8px"><button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button><button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button></div>` : ''}
       <div class="row" style="margin-top:10px">
@@ -2285,7 +2368,7 @@ function employeeActionPanel(emp){
     <strong>${rangeLabel}</strong>
     <div class="row">
       <div><label>Request</label><select onchange="setEmpReqType(this.value)">${["PTO","Off","Desired shift"].map(t=>`<option ${t===type?"selected":""}>${t}</option>`).join("")}</select></div>
-      ${type==="Desired shift" ? `<div><label>Start</label><select id="empStart">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===emp.pref?"selected":""}>${fmtHour(h)}</option>`).join("")}</select></div><div><label>Hours</label><input type="number" id="empDur" value="12" min="1" max="16" style="width:60px"></div>` : ""}
+      ${type==="Desired shift" ? `<div><label>Start</label><select id="empStart">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===nursePrefs(emp)[0]?"selected":""}>${fmtHour(h)}</option>`).join("")}</select></div><div><label>Hours</label><input type="number" id="empDur" value="12" min="1" max="16" style="width:60px"></div>` : ""}
       <div style="flex:1;min-width:180px"><label>Note (optional)</label><input type="text" id="empNote" style="width:100%"></div>
     </div>
     <p class="desc" style="margin:0">${help}${scheduledDays && type!=="Desired shift" ? ` You're currently scheduled on ${scheduledDays} of these day${scheduledDays===1?"":"s"}.` : ""}</p>
