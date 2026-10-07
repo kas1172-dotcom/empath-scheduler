@@ -672,20 +672,8 @@ function coverageTab(){
       const names = esc(who[h].map(id=>nurse(id)?.name.split(" ")[0]).join(", ") || "no one");
       return `<div class="tick ${cls}" data-tip="${fmtHour(h)}: ${c} on / ${req} required — ${names}" onclick="tickClick('${d}',${h})"></div>`;
     }).join("");
-    const {cov:aideCov, who:aideWho} = coverageForDate(d, n=>n.role==="Aide");
-    const aideEdges = shiftBoundaryHours(d, n=>n.role==="Aide");
-    const aideTicks = aideCov.map((c,h)=>{
-      const req = state.requirement.aideFloor;
-      let cls = c>=req ? "ok" : "short";
-      if(c===0) cls += " floor-fail";
-      if(aideEdges.has(h)) cls += " shift-edge";
-      if(selDate===d && selStart!==null && h>=Math.min(selStart,selEnd) && h<=Math.max(selStart,selEnd)) cls += " selected";
-      const names = esc(aideWho[h].map(id=>nurse(id)?.name.split(" ")[0]).join(", ") || "no one");
-      return `<div class="tick ${cls}" data-tip="${fmtHour(h)}: ${c} aide(s) on / ${req} required — ${names}" onclick="tickClick('${d}',${h})"></div>`;
-    }).join("");
     const holidayTag = isHoliday(d) ? `<br><span class="pill" style="background:var(--amber-soft);color:var(--amber)">Holiday</span>` : "";
-    return `<div class="cov-day"><div class="lbl">${DAY_NAMES[i]}<br><span style="font-family:var(--mono);font-size:10.5px">${d.slice(5)}</span>${holidayTag}</div><div class="cov-ticks">${ticks}</div></div>
-      <div class="cov-day" style="padding-top:0"><div class="lbl" style="font-size:10.5px;color:var(--gold)">Aide</div><div class="cov-ticks">${aideTicks}</div></div>`;
+    return `<div class="cov-day"><div class="lbl">${DAY_NAMES[i]}<br><span style="font-family:var(--mono);font-size:10.5px">${d.slice(5)}</span>${holidayTag}</div><div class="cov-ticks">${ticks}</div></div>`;
   }).join("");
 
   const axis = Array.from({length:24},(_,h)=> h%3===0 ? `<div>${fmtHour(h)}</div>` : `<div></div>`).join("");
@@ -724,7 +712,7 @@ function coverageTab(){
     <div class="panel">
       <h2>Hourly coverage</h2>
       ${weekNavControlHTML()}
-      <p class="desc">Each tick is one hour, tap or click it to reassign or add coverage right there. Tap a second tick in the same day to extend the selection to everything between them, no modifier key needed, works the same with a mouse or a finger. Green means the assigned count meets the requirement for that hour. Rust means short; outlined rust means zero coverage, a hard floor failure. A dark left edge on a tick marks where a shift actually starts or ends, so you can see individual shifts breaking apart within the strip instead of one solid block of color. Hover or tap-and-hold a tick to see who's on. Amber "Holiday" tags mark configured holidays, edit the list in Census & FTE. The thin gold-labeled "Aide" row underneath each day tracks psychiatric aide coverage separately, it has its own always-on floor, not tied to the nurse ratio, since an aide doesn't satisfy that requirement.</p>
+      <p class="desc">Each tick is one hour. Tap or click a tick to reassign or add coverage there; tap a second tick in the same day to select everything between them (no modifier key needed, works with mouse or finger). Green meets the requirement for that hour; rust is short; outlined rust is zero coverage, a hard floor failure. A dark left edge marks where a shift actually starts or ends. Hover or tap-and-hold a tick to see who's on. Amber "Holiday" tags mark configured holidays, edit the list in Census &amp; FTE.</p>
       ${stripRows}
       <div class="hour-axis"><div></div><div class="ha">${axis}</div></div>
       <div class="legend">
@@ -743,7 +731,14 @@ function coverageTab(){
 
     <div class="panel">
       <h2>Auto-fill gaps</h2>
-      <p class="desc">This is a rule-based heuristic, not a real optimizer, and it only fills shortfalls — it never touches an assignment you've already made. It only fills the RN/Manager ratio requirement, not the aide floor above, since aides self-schedule and this heuristic doesn't touch their coverage at all. For each day/night band it checks every hour in that band, not just its start, so a shorter shift that leaves a gap partway through still gets caught, then picks nurses who are free (not already working, not on approved PTO, rest-compliant), ranked by: (1) shift-time preference match first, (2) for day-band gaps, manager role gets soft priority, (3) fewest hours already scheduled this week, (4) lowest equity score, meaning least burden carried so far. It also swaps in a certified nurse if the block would otherwise have none available. It fills to close the worst hour in the band with a full-length shift, which can leave you looking overstaffed at the band's easier hours, that's the tradeoff for guaranteeing the worst gap actually closes.</p>
+      <p class="desc">A rule-based heuristic, not a real optimizer. It only adds shifts to close shortfalls, it never changes or removes anything you've already scheduled, and it never touches aide coverage (aides self-schedule).</p>
+      <ul class="desc" style="margin:0 0 10px 18px;padding:0;list-style:disc;">
+        <li>Checks every hour of each day/night band, not just the start, so a shorter shift that leaves a gap partway through still gets caught.</li>
+        <li>Closes one gap at a time with a standard-length shift (8h if the gap is narrow, 12h if it spans more of the band) sized and placed to cover just that gap, instead of always stacking a full 12-hour shift from the band's start, which used to overstaff the band's easier hours.</li>
+        <li>Only considers nurses who are free: not already on shift, not on approved PTO, and rest-compliant (10+ hours since their last shift).</li>
+        <li>Among those, ranks by: fatigue first (anyone already on a 3rd+ consecutive working day goes last, not excluded, so a gap still gets filled if they're the only option), then shift-time preference match, then manager soft-priority for day-band gaps, then fewest hours already scheduled this week, then lowest equity score (least burden carried so far).</li>
+        <li>Swaps in a certified nurse for the gap it's filling if no one already covering that window is certified.</li>
+      </ul>
       <div class="row">
         <button class="btn" onclick="runAutoFill()">Auto-fill gaps</button>
         ${confirmingClear
@@ -888,6 +883,19 @@ function shortHoursInWeek(){
   DAYS.forEach(dt=>{ const c=coverageForDate(dt, n=>n.role!=="Aide").cov; for(let h=0;h<24;h++) if(c[h]<requiredForHour(h)) s++; });
   return s;
 }
+// Consecutive calendar days with any shift, counting backward from (but not including) `date`.
+// Used as a soft fatigue tie-break: capping consecutive 12-hour shifts at 3 before a rest day is
+// standard shift-scheduling guidance (ANA/NIOSH fatigue-management recommendations), so a nurse
+// already on day 3+ gets ranked behind anyone equally eligible but less stacked, without ever being
+// excluded outright, auto-fill still has to close the gap from whoever's actually available.
+function consecutiveDaysWorked(nurseId, date){
+  let n = 0, cur = date;
+  while(true){
+    cur = addDays(cur, -1);
+    if(state.assignments.some(a=>a.nurseId===nurseId && a.date===cur)) n++; else break;
+  }
+  return n;
+}
 function runAutoFill(){
   snapshot();
   const bands = [{start:7,label:"day"},{start:19,label:"night"}];
@@ -896,53 +904,74 @@ function runAutoFill(){
   // which sits just outside the week on screen. Plan that night band too, counting only the hours that land in this week.
   const plan = [{d:addDays(DAYS[0],-1), b:bands[1], weekOnly:true}];
   DAYS.forEach(d=>bands.forEach(b=>plan.push({d,b,weekOnly:false})));
-  let added = 0, addedBefore = 0;
+  let added = 0, addedBefore = 0, uncoverable = 0;
   plan.forEach(({d,b,weekOnly})=>{
-    const currentlyOn = new Set();      // anyone working AT the band's start hour, any role, used to avoid double-booking a new full-band pick
-    state.assignments.filter(a=>a.date===d).forEach(a=>{
-      const occ = occupiedByDate(a)[d]||[];
-      if(occ.includes(b.start)) currentlyOn.add(a.nurseId);
-    });
-    // Scan every hour in the band, not just its start hour: a shorter shift (say an 8hr 7A-330P)
-    // leaves a real gap later in the band that checking only hour 7 would never see. For the night
-    // band this crosses midnight into the next calendar date, so each hour is checked against
-    // whichever date it actually falls on.
-    let need = 0;
+    // The band's 12 real (date,hour) cells, trimmed to this week when weekOnly is set. Built once;
+    // coverage within it is re-read live on every pass below so a shift just added in this band
+    // counts immediately, instead of computing one peak shortfall up front and blanket-filling it.
+    const cells = [];
     for(let h=0; h<12; h++){
       const hour = (b.start+h)%24;
       const dayOffset = Math.floor((b.start+h)/24);
       const checkDate = dayOffset===0 ? d : addDays(d, dayOffset);
       if(weekOnly && !DAYS.includes(checkDate)) continue;
-      const covCheck = coverageForDate(checkDate, n=>n.role!=="Aide").cov;
-      need = Math.max(need, requiredForHour(hour) - covCheck[hour]);
+      cells.push({hour, date:checkDate});
     }
-    if(need<=0) return;
-    let eligible = state.nurses.filter(n=>{
-      if(n.role==="Aide") return false; // aides self-schedule, auto-fill doesn't touch their coverage
-      if(currentlyOn.has(n.id)) return false;
-      if(approvedPTO(n.id,d)) return false;
-      if(restViolation(n.id,d,b.start,12)) return false;
-      return true;
-    });
-    eligible.sort((a,c)=>{
-      const prefA = Math.abs(a.pref-b.start)<=2 ? 0:1, prefC = Math.abs(c.pref-b.start)<=2 ? 0:1;
-      if(prefA!==prefC) return prefA-prefC;
-      if(b.label==="day"){ const mgrA = a.role==="Manager"?0:1, mgrC = c.role==="Manager"?0:1; if(mgrA!==mgrC) return mgrA-mgrC; }
-      const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
-      if(hoursA!==hoursC) return hoursA-hoursC;
-      return equityScore(a)-equityScore(c);
-    });
-    const picks = eligible.slice(0,need);
-    const blockNurses = [...currentlyOn].map(nurse).filter(n=>n && n.role!=="Aide");
-    const hasCert = blockNurses.some(n=>n && n.cert) || picks.some(p=>p.cert);
-    if(!hasCert){
-      const certPick = eligible.find(n=>n.cert && !picks.includes(n));
-      if(certPick && picks.length) picks[picks.length-1] = certPick;
-    }
-    picks.forEach(n=>{
-      state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:n.id, date:d, start:b.start, duration:12});
+    if(!cells.length) return;
+    const deficitAt = c => requiredForHour(c.hour) - coverageForDate(c.date, n=>n.role!=="Aide").cov[c.hour];
+
+    // Close one gap at a time until the band is fully covered or nobody's left to cover it with.
+    for(let guard=0; guard<24; guard++){
+      let worstIdx = -1, worstDeficit = 0;
+      cells.forEach((c,i)=>{ const def = deficitAt(c); if(def>worstDeficit){ worstDeficit = def; worstIdx = i; } });
+      if(worstIdx===-1) break; // band fully covered
+
+      // Grow outward from the worst hour across the contiguous run of still-short hours, so the new
+      // shift is sized to the actual gap instead of always spanning the whole band.
+      let lo = worstIdx, hi = worstIdx;
+      while(lo>0 && deficitAt(cells[lo-1])>0) lo--;
+      while(hi<cells.length-1 && deficitAt(cells[hi+1])>0) hi++;
+      const gapLen = hi-lo+1;
+      // Use a standard 8-hour shift when the gap is narrow; fall back to a full 12-hour shift (from
+      // the band's start) when it spans more than that. Either way the shift stays inside this band's
+      // cells so it never overstaffs hours that are already covered — the main tradeoff with always
+      // using a single full-length shift from the band's start.
+      const span = Math.min(gapLen<=8 ? 8 : 12, cells.length);
+      const startIdx = Math.max(0, Math.min(lo, cells.length-span));
+      const startCell = cells[startIdx];
+
+      const eligible = state.nurses.filter(n=>{
+        if(n.role==="Aide") return false; // aides self-schedule, auto-fill doesn't touch their coverage
+        if(approvedPTO(n.id, startCell.date)) return false;
+        if(restViolation(n.id, startCell.date, startCell.hour, span)) return false; // also catches overlap with an existing shift
+        return true;
+      });
+      if(!eligible.length){ uncoverable++; break; } // nobody left who can take this gap, stop and let the summary report it
+
+      eligible.sort((a,c)=>{
+        const consA = consecutiveDaysWorked(a.id, startCell.date)>=3 ? 1:0, consC = consecutiveDaysWorked(c.id, startCell.date)>=3 ? 1:0;
+        if(consA!==consC) return consA-consC; // fatigue guard: 3-in-a-row goes last, never excluded outright
+        const prefA = Math.abs(a.pref-b.start)<=2 ? 0:1, prefC = Math.abs(c.pref-b.start)<=2 ? 0:1;
+        if(prefA!==prefC) return prefA-prefC;
+        if(b.label==="day"){ const mgrA = a.role==="Manager"?0:1, mgrC = c.role==="Manager"?0:1; if(mgrA!==mgrC) return mgrA-mgrC; }
+        const hoursA = weeklyHoursFor(a.id), hoursC = weeklyHoursFor(c.id);
+        if(hoursA!==hoursC) return hoursA-hoursC;
+        return equityScore(a)-equityScore(c);
+      });
+
+      let pick = eligible[0];
+      // If nobody already covering this specific window is certified, prefer a certified nurse for it.
+      const onDuty = new Set();
+      cells.slice(startIdx, startIdx+span).forEach(c=>{ coverageForDate(c.date, n=>n.role!=="Aide").who[c.hour].forEach(id=>onDuty.add(id)); });
+      const blockCertified = [...onDuty].some(id=>nurse(id)?.cert) || pick.cert;
+      if(!blockCertified){
+        const certPick = eligible.find(n=>n.cert);
+        if(certPick) pick = certPick;
+      }
+
+      state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId:pick.id, date:startCell.date, start:startCell.hour, duration:span});
       added++; if(weekOnly) addedBefore++;
-    });
+    }
   });
   const shortAfter = shortHoursInWeek();
   const hrs = n=>`${n} hour${n===1?"":"s"}`;
