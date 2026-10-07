@@ -534,6 +534,7 @@ function canTakeSlot(n, target, own){
   if(n.role==="Aide") return false;
   const st = nurseShiftType(n);
   if(st!=="any" && st!==bandOfStart(target.start)) return false;
+  if(n.role==="Manager" && managerOverlapsAt(target.date, target.start, target.duration, own.id)) return false; // never two Managers on the floor at once
   if(approvedPTO(n.id, target.date)) return false;
   if(restViolation(n.id, target.date, target.start, target.duration, own.id)) return false;
   return true;
@@ -651,6 +652,20 @@ function restViolation(nurseId, date, start, duration, excludeId){
     if(gap>=0 && gap<10) return "rest";
   }
   return null;
+}
+// Is any OTHER Manager already scheduled somewhere in [date,start,duration)? Unlike restViolation
+// (one nurse against their own other shifts), this checks across nurses — the unit never wants two
+// Managers on the floor at the same time. excludeId lets a check for "would nurse X cover this slot"
+// ignore the specific assignment X themselves is vacating (used by the auto-fill repair pass swap).
+function managerOverlapsAt(date, start, duration, excludeId){
+  const newStart = toAbs(date,start), newEnd = newStart+duration;
+  return state.assignments.some(a=>{
+    if(a.id===excludeId) return false;
+    const n = nurse(a.nurseId);
+    if(!n || n.role!=="Manager") return false;
+    const oStart = toAbs(a.date,a.start), oEnd = oStart+a.duration;
+    return !(newEnd<=oStart || newStart>=oEnd);
+  });
 }
 
 /* ---- equity score, corrected ---- */
@@ -875,6 +890,7 @@ function confirmAddShift(nurseId,date){
   const viol = restViolation(nurseId,date,start,dur);
   if(viol==="overlap"){ document.getElementById("asWarn").innerHTML = `<span class="flag bad">Overlaps an existing shift for this nurse</span>`; return; }
   if(viol==="rest"){ document.getElementById("asWarn").innerHTML = `<span class="flag warn">Under 10hrs rest from an adjacent shift.</span> <button class="btn secondary" onclick="forceAdd('${nurseId}','${date}',${start},${dur})">Add anyway</button>`; return; }
+  if(nurse(nurseId)?.role==="Manager" && managerOverlapsAt(date,start,dur,null)){ document.getElementById("asWarn").innerHTML = `<span class="flag warn">Another Manager is already scheduled during this window — the unit's rule is never two Managers on the floor at once.</span> <button class="btn secondary" onclick="forceAdd('${nurseId}','${date}',${start},${dur})">Add anyway</button>`; return; }
   snapshot();
   state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId, date, start, duration:dur});
   document.getElementById("addShiftForm").innerHTML=""; render();
@@ -933,6 +949,8 @@ function reassignHour(assignmentId, newNurseId){
   snapshot();
   const a = state.assignments.find(x=>x.id===assignmentId);
   a.nurseId = newNurseId;
+  const n = nurse(newNurseId);
+  if(n?.role==="Manager" && managerOverlapsAt(a.date,a.start,a.duration,a.id)) flashMessage = `Heads up: another Manager is already on during that window — this now puts two Managers on the floor at once.`;
   render(); openHourEditor();
 }
 function addHourCoverage(){
@@ -940,7 +958,9 @@ function addHourCoverage(){
   const start = Number(document.getElementById("heStart").value);
   const dur = Number(document.getElementById("heDur").value);
   snapshot();
-  state.assignments.push({id:"a"+Math.random().toString(36).slice(2), nurseId, date:selDate, start, duration:dur});
+  const newId = "a"+Math.random().toString(36).slice(2);
+  state.assignments.push({id:newId, nurseId, date:selDate, start, duration:dur});
+  if(nurse(nurseId)?.role==="Manager" && managerOverlapsAt(selDate,start,dur,newId)) flashMessage = `Heads up: another Manager is already on during that window — this now puts two Managers on the floor at once.`;
   render(); openHourEditor();
 }
 
@@ -1053,6 +1073,7 @@ function runAutoFill(){
         if(n.role==="Aide") return false; // aides self-schedule, auto-fill doesn't touch their coverage
         const st = nurseShiftType(n);
         if(st!=="any" && st!==b.label) return false; // hard day-only / night-only lock
+        if(n.role==="Manager" && managerOverlapsAt(startCell.date, startCell.hour, span, null)) return false; // never two Managers on the floor at once
         if(approvedPTO(n.id, startCell.date)) return false;
         if(restViolation(n.id, startCell.date, startCell.hour, span)) return false; // also catches overlap with an existing shift
         return true;
