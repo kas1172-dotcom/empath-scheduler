@@ -1284,6 +1284,8 @@ async function handleSpreadsheetUpload(input){
   };
   reader.readAsArrayBuffer(file);
 }
+// Returns a WHOLE hour 0-23 (this app's entire coverage grid is integer-hour), rounding to the
+// nearest hour for anything with minutes, since there's nowhere finer-grained to put them.
 function parseHourLabel(v){
   if(v==null || v==="") return null;
   if(v instanceof Date && !isNaN(v)) return v.getHours();
@@ -1291,6 +1293,14 @@ function parseHourLabel(v){
   const s = String(v).trim().toLowerCase();
   let m = s.match(/^(\d{1,2})\s*(a|am|p|pm)$/);
   if(m){ let h = Number(m[1])%12; if(m[2][0]==='p') h += 12; return h; }
+  // "3:30p" / "3:30 pm" — colon time WITH an am/pm suffix. Used to fall through to the next
+  // pattern, which reads the hour digit and silently drops both the minutes AND the am/pm, so
+  // "3:30p" (3:30pm) came back as 3 (3am) — a 12-hour, not just 30-minute, error. Round to the
+  // nearest whole hour instead of truncating, so :30 and later rounds up rather than always down.
+  m = s.match(/^(\d{1,2}):(\d{2})\s*(a|am|p|pm)$/);
+  if(m){ let h = Number(m[1])%12; if(m[3][0]==='p') h += 12; const mins = Number(m[2]); return mins>=30 ? (h+1)%24 : h; }
+  // Bare "H:MM", no am/pm — ambiguous 24h-ish input; keep the previous hour-truncating behavior
+  // (can't safely round using minutes without knowing which half of the day this is).
   m = s.match(/^(\d{1,2}):(\d{2})/);
   if(m) return Number(m[1])%24;
   const n = Number(s);
