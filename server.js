@@ -10,6 +10,13 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
+app.disable('x-powered-by');
+app.use('/api', (req, res, next) => {
+  const token = process.env.APP_ACCESS_TOKEN;
+  if (process.env.ENABLE_PRIVATE_API !== 'true' || !token) return res.status(403).json({error:'Public demo: shared storage and AI endpoints are disabled.'});
+  if (req.headers.authorization !== `Bearer ${token}`) return res.status(401).json({error:'Authentication required.'});
+  next();
+});
 app.use(express.json({ limit: "15mb" })); // generous enough for a phone photo as base64
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
@@ -140,7 +147,7 @@ Current context (JSON), already scoped to what you need: ${JSON.stringify(contex
 
 Rules:
 - Only ever refer to nurses by the exact "name" strings given in context.nurses. Never invent a name. If the manager's request is ambiguous (unclear nurse, date, or which shift they mean), ask a clarifying question in "reply" and return an empty actions array rather than guessing.
-- If the manager is just asking a question ("who's working Saturday night", "how many hours does Dawn have this week"), answer it directly and concisely in "reply" using the data in context, and return an empty actions array. You're not expected to change anything for a question.
+- If the manager is just asking a question ("who's working Saturday night", "how many hours does Demo Nurse 06 have this week"), answer it directly and concisely in "reply" using the data in context, and return an empty actions array. You're not expected to change anything for a question.
 - If the manager wants something changed, put a short plain-English summary of what you're proposing (and why) in "reply", and the actual structured change(s) in "actions". Nothing is applied automatically, the manager reviews and confirms every action before it touches the real schedule, so propose freely and explain your reasoning, don't ask permission first, the review step IS the permission step.
 - Action types, each needs "type" and "why" (a short clause explaining that specific action), plus:
   - add_shift: nurseName, date (YYYY-MM-DD), start (0-23, hour it begins), duration (hours)
@@ -223,8 +230,10 @@ Rules:
 
 // Serve the app itself — same index.html used standalone on GitHub Pages / the Claude artifact
 // viewer, this server just also answers the /api/* routes above so it can tell it's hosted here.
-app.use(express.static(path.join(__dirname), { extensions: ["html"] }));
-app.get("*", (req, res) => {
+for (const file of ['index.html', 'analytics.js', 'operations.js']) {
+  app.get('/' + file, (req, res) => res.sendFile(path.join(__dirname, file)));
+}
+app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 

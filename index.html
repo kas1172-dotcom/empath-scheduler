@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EMPATH Unit Scheduler — Demo</title>
+<title>EMPATH Unit Clinical Staffing & Operations Platform — Demo</title>
 <style>
   :root{
     --bg:#FDFCFE; --panel:#FFFFFF; --ink:#2A2438; --ink-soft:#6B6178;
@@ -176,14 +176,23 @@
   .rank-list{ padding-left:18px; }
   .rank-list li{ margin-bottom:6px; }
   .foot-note{ font-size:11px; color:var(--ink-soft); margin-top:16px; border-top:1px solid var(--border); padding-top:12px; }
+
+  .demo-notice { padding:14px 24px; background:#f1edf8; color:#352853; font-size:13px; line-height:1.6; border-bottom:1px solid var(--border); }
+  .ops-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(205px,1fr)); gap:16px; margin:18px 0; }
+  .ops-grid .stat { text-align:left; padding:16px; border:1px solid var(--border); border-radius:8px; }
+  .ops-grid .desc { font-size:12px; margin:8px 0 0; }
+  .ops-definitions { padding-left:20px; line-height:1.8; }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid #6352a0; outline-offset:3px; }
+  @media(max-width:600px) { header { flex-wrap:wrap; padding:18px; } header h1 { font-size:21px; } main { padding:14px; } .demo-notice { padding:12px 18px; } .ops-grid { grid-template-columns:1fr; } }
+@media print { body::before { content:"SYNTHETIC DEMONSTRATION — NOT HOSPITAL DATA"; display:block; font-weight:bold; padding:12px; border:2px solid #333; } }
 </style>
 </head>
 <body>
 
 <header>
   <div>
-    <h1>EMPATH Unit Scheduler</h1>
-    <div class="sub">12-capacity crisis stabilization unit, ED extension. Saves automatically.</div>
+    <h1>EMPATH Unit Clinical Staffing & Operations Platform</h1>
+    <div class="sub">Public interactive demonstration · Fictional staffing and synthetic unit totals</div>
     <div id="modeToggle" style="margin-top:8px"></div>
   </div>
   <div id="undoControl"></div>
@@ -191,11 +200,14 @@
   <div class="stats" id="statsBar"></div>
 </header>
 
+<div class="demo-notice no-print"><strong>Demonstration only.</strong> All seeded staff and operational values are fictional. Do not enter patient information or real staff details. Changes stay in this tab and reset on reload. <button class="btn secondary" onclick="location.reload()">Reset demo</button></div>
 <nav id="tabs"></nav>
 <main id="main"></main>
 <div id="chatWidget" class="no-print"></div>
 
+<script src="analytics.js"></script>
 <script>
+const DEMO_MODE = true;
 /* ============ STATE ============ */
 function weekDays(start){ return Array.from({length:7}, (_,i)=>addDays(start,i)); }
 function currentWeekStartISO(){
@@ -235,7 +247,7 @@ let state = {
   requirement: { day:2, night:1, floor:1, aideFloor:1 },
   ratioTarget: 5,
   censusViewMode: "week",
-  budget: { rnWage:48, mgrWage:58, diffPct:10, holidayDiffPct:50, weeklyTarget:14000 },
+  budget: { aideWage:25, rnWage:48, mgrWage:58, diffPct:10, holidayDiffPct:50, weeklyTarget:14000 },
   printOpts: { format:"grid", orientation:"portrait", range:"1week", includeRole:true, includeOT:true, includeHoliday:true, note:"" },
   census: {
     [DAYS[0]]:{day:0,night:0}, [DAYS[1]]:{day:0,night:0}, [DAYS[2]]:{day:0,night:0},
@@ -243,26 +255,8 @@ let state = {
   },
   manualFTE: {}, // dateISO -> a real historical FTE figure imported from a spreadsheet, overrides the computed one
   syncedWeeks: [], // week-start ISO dates already folded into equity YTD, guards against double-counting
-  // This roster reflects the unit's actual staff and stays. Shifts, requests, and census were a
-  // single illustrative past week, not real data, so those start blank — bring in real history
-  // with the spreadsheet or photo import on the Census & FTE tab, build weeks going forward in
-  // Coverage, and let real census come from there or from staff submitting it in the Employee portal.
-  nurses: [
-    {id:"n1", name:"Laurie Swift",     role:"Manager", fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n2", name:"Anthony Trocano",  role:"Manager", fte:1.0, cert:true,  prefs:[19], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n3", name:"Christine Davis",  role:"RN",      fte:1.0, cert:true,  prefs:[9],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n4", name:"Kimberly Fritz",   role:"RN",      fte:1.0, cert:true,  prefs:[12], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n5", name:"Mary Ronca",       role:"RN",      fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n6", name:"Dawn Erickson",    role:"RN",      fte:1.0, cert:false, prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n7", name:"Edward Earvin",    role:"RN",      fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n8", name:"Arnetta Sciulli",  role:"RN",      fte:0.5, cert:false, prefs:[21], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n9", name:"Dyan Conaway",     role:"RN",      fte:1.0, cert:true,  prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n10",name:"Christina Stevens",role:"RN",      fte:1.0, cert:true,  prefs:[21], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"n11",name:"Faith Ndiga",      role:"RN",      fte:0.5, cert:false, prefs:[7],  nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"p1", name:"Hemant Thapa", role:"Aide", fte:1.0, cert:false, prefs:[6], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"p2", name:"Kapil Sharma", role:"Aide", fte:0, cert:false, prefs:[6], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-    {id:"p3", name:"General Sitter (pool, fills gaps)", role:"Aide", fte:0, cert:false, prefs:[6], nightsYTD:0, weekendsYTD:0, holidaysYTD:0, calloffs:0, ptoHonored:0, ptoDenied:0, prefHonored:0, prefDenied:0},
-  ],
+  // Fictional labels only. No real staff roster is shipped with the public demo.
+  nurses: Array.from({length:14}, (_,i)=>({id:'demo'+(i+1),name:(i<10?'Demo Nurse ':'Demo Aide ')+String(i<10?i+1:i-9).padStart(2,'0'),role:i<10?'RN':'Aide',fte:1,cert:i<10,prefs:[i%2?19:7],nightsYTD:i%5,weekendsYTD:i%3,holidaysYTD:0,calloffs:0,ptoHonored:0,ptoDenied:0,prefHonored:0,prefDenied:0})),
   assignments: [],
   requests: [],
 };
@@ -318,13 +312,14 @@ function renderUndoControl(){
    editing is routine. The localStorage path has no such collision risk, because nothing else can
    write it, but for the same reason it also never syncs between people or devices — only between
    tabs of the same browser, via the native 'storage' event, wired in below. */
-const LS_KEY = "empath-scheduler-state-v1";
+const LS_KEY = "empath-demo-v2";
 let dbDoc = null, dbUnsub = null;
 let persistMode = "none"; // "server" | "cloud" | "local" | "none" — decided once at boot, in initPersistence
 let syncState = "loading"; // loading | saved | saving | dirty | unavailable | error
 let dirty = false, saving = false, saveTimer = null;
 let serverUpdatedAt = 0, serverPollTimer = null; // "server" mode only: last-seen write timestamp + polling handle
 function renderSyncStatus(){
+  if(DEMO_MODE){ document.getElementById("syncStatus").textContent="Demo · resets on reload"; return; }
   const el = document.getElementById("syncStatus");
   if(!el) return;
   const localSuffix = persistMode==="local" ? " (this device only, won't sync or follow you elsewhere)" : "";
@@ -340,6 +335,7 @@ function renderSyncStatus(){
   el.innerHTML = label ? `<span class="flag ${cls}" style="font-size:10.5px" title="${cls==='bad'?'Changes only last until you close or refresh this tab.':''}">${label}</span>` : "";
 }
 function markDirty(){
+  if(DEMO_MODE) return;
   if(persistMode==="none"){ syncState = syncState==="loading" ? "loading" : "unavailable"; renderSyncStatus(); return; }
   dirty = true;
   syncState = "dirty";
@@ -347,6 +343,7 @@ function markDirty(){
   scheduleSave();
 }
 function scheduleSave(){
+  if(DEMO_MODE) return;
   if(saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(doSave, 900);
 }
@@ -387,6 +384,7 @@ function applyLoadedData(data){
   Object.keys(dataFields()).forEach(k=>{ if(data[k]!==undefined) state[k] = data[k]; });
 }
 async function initPersistence(){
+  if(DEMO_MODE){ persistMode="none"; syncState="demo"; render(); return; }
   // Path 0: this copy of the page is being served by its own backend (the Fly.io deployment, if
   // you've set one up) — real server-side persistence in a database file, independent of any one
   // browser, and synced across every device that opens this URL. A static copy of this same file
@@ -691,8 +689,8 @@ function scoreBreakdown(n){
 function equityScore(n){ return scoreBreakdown(n).reduce((s,x)=>s+x.points,0); }
 
 /* ============ RENDER ============ */
-const TABS = ["Coverage","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
-let activeTab = "Coverage";
+const TABS = ["Operations","Coverage","Census & FTE","Trends & Budget","Roster","Requests","Equity","Call-offs","Print"];
+let activeTab = "Operations";
 
 function render(){
   DAYS = weekDays(state.weekStart);
@@ -760,6 +758,7 @@ function setTab(t){ activeTab=t; flashMessage=""; autoFillNote=""; render(); }
 function renderMain(){
   const m = document.getElementById("main");
   if(state.mode==="employee"){ m.innerHTML = employeePortal(); return; }
+  if(activeTab==="Operations") m.innerHTML = operationsTab();
   if(activeTab==="Coverage") m.innerHTML = coverageTab();
   if(activeTab==="Census & FTE") m.innerHTML = censusTab();
   if(activeTab==="Trends & Budget") m.innerHTML = trendsTab();
@@ -808,7 +807,7 @@ function coverageTab(){
   return `
     <div class="panel">
       <h2>Editable weekly schedule</h2>
-      <p class="desc">Every nurse can have a fully custom start time and shift length, nothing is locked to a fixed 7-7 or 9-9 block unless you set it that way. A rust "OT" tag means this nurse is scheduled past ${state.otThreshold} hours this week, federal overtime territory under FLSA, at 1.5x pay on the excess. Adding a shift never blocks on this, it's a flag for you to weigh, not a hard rule.</p>
+      <p class="desc">Every nurse can have a fully custom start time and shift length, nothing is locked to a fixed 7-7 or 9-9 block unless you set it that way. A rust "OT" tag means this nurse is scheduled past ${state.otThreshold} hours this week, using the demonstration’s 1.5x overtime cost assumption on the excess. Adding a shift never blocks on this, it's a flag for you to weigh, not a hard rule.</p>
       ${weekNavControlHTML()}
       <div style="overflow-x:auto;">
         <table><thead><tr><th>Nurse</th>${DAY_NAMES.map((d,i)=>`<th>${d} ${DAYS[i].slice(5)}</th>`).join("")}</tr></thead>
@@ -1211,7 +1210,7 @@ function censusTab(){
 
     <div class="panel">
       <h2>Import past shifts from a photo</h2>
-      <p class="desc">Take or upload one or more photos of a printed or handwritten schedule and this reads each one with a vision model, the same way the spreadsheet import above works but for pictures instead of a file. ${persistMode==='server' ? 'Each photo is sent to this app\'s own server, which calls the model and never stores the image itself.' : 'This needs the Fly.io-hosted version of this app, since reading a photo requires a server-side model call that a plain static copy can\'t make. '+(persistMode==='cloud'?'Not available in this demo viewer.':'Deploy the server (see the README) to turn this on.')}</p>
+      <p class="desc">Take or upload one or more photos of a printed or handwritten schedule and this reads each one with a vision model, the same way the spreadsheet import above works but for pictures instead of a file. ${persistMode==='server' ? 'Each photo is sent to this app\'s own server, which calls the model and never stores the image itself.' : 'Photo import is disabled in this public demonstration. '+(persistMode==='cloud'?'Not available in this demo viewer.':'No photos are transmitted by this demo.')}</p>
       <div class="row">
         <input type="file" accept="image/*" capture="environment" multiple ${persistMode!=='server'?'disabled':''} onchange="handleScheduleImageUpload(this)">
       </div>
@@ -1220,7 +1219,7 @@ function censusTab(){
 
     <div class="panel">
       <h2>Overtime and holiday rules</h2>
-      <p class="desc">Federal law (FLSA) triggers overtime at over 40 hours in a work week for hourly staff, no daily overtime rule applies in Pennsylvania the way it does in California. That threshold and your holiday calendar both drive pay in the Trends &amp; Budget tab and the OT flag on the schedule below. Holiday pay stacks with night/weekend differential here, confirmed as your actual policy: a nurse working a night shift that falls on a holiday gets both premiums added together, not just the larger one.</p>
+      <p class="desc">This demonstration assumes a Monday-start workweek, a configurable overtime threshold, and a 1.5x cost multiplier. Night/weekend and holiday differentials stack in the estimate. These are editable planning assumptions, not a statement of hospital policy or applicable law.</p>
       <div class="row">
         <div><label>Overtime threshold (hrs/week)</label><input type="number" min="1" value="${state.otThreshold}" style="width:80px" onchange="setOtThreshold(this.value)"></div>
       </div>
@@ -1396,6 +1395,7 @@ function downscaleImageToJPEGBase64(file, maxDim=1600, quality=0.82){
 // pendingImageImport or flashMessage itself — handleScheduleImageUpload calls this once per file
 // and merges the results, so multiple photos land in a single combined preview.
 async function readScheduleImageFile(file, label){
+  if(DEMO_MODE) return {candidates:[],notes:["Photo import is unavailable in this public demonstration."]};
   const imageBase64 = await downscaleImageToJPEGBase64(file);
   const res = await fetch("/api/parse-schedule-image", {
     method:"POST", headers:{"Content-Type":"application/json"},
@@ -1682,12 +1682,12 @@ function chatPanelBodyHTML(){
       </div>`;
     })() : (m.actions && m.actions.length && m.actionsApplied ? `<div class="pill" style="margin-top:6px;background:var(--border-soft);color:var(--ink-soft)">reviewed</div>` : "");
     return `<div class="chat-msg chat-assistant"><div class="chat-bubble">${esc(m.text)}</div>${actionsHTML}</div>`;
-  }).join("") || `<p class="desc" style="padding:14px 4px">Ask about the schedule ("who's working Saturday night"), or describe a change ("give Dawn Friday off", "Edward needs Oct 10–24 off"). Nothing changes until you review and apply it.</p>`;
+  }).join("") || `<p class="desc" style="padding:14px 4px">Ask about the schedule ("who's working Saturday night"), or describe a change ("give Demo Nurse 06 Friday off", "Demo Nurse 07 needs Oct 10–24 off"). Nothing changes until you review and apply it.</p>`;
   return `
     <p class="desc" style="margin:0 0 8px">Talk to it like a coworker: ask questions, or describe what you want different. It proposes changes for you to review, nothing touches the real schedule until you hit Apply. It can add or remove shifts, mark someone off for a date range, update FTE, or correct a census number — for anything else (adding a nurse, changing role/cert) use the Roster tab directly.</p>
     <div id="chatLogBox" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel-soft,transparent)">${bubbles}</div>
     <div class="row" style="margin-top:10px;align-items:flex-start">
-      <textarea id="chatInput" rows="2" style="flex:1;resize:vertical" placeholder="e.g. Edward needs Oct 10 through Oct 24 off" onkeydown="chatKeydown(event)" ${chatBusy?'disabled':''}></textarea>
+      <textarea id="chatInput" rows="2" style="flex:1;resize:vertical" placeholder="e.g. Demo Nurse 07 needs Oct 10 through Oct 24 off" onkeydown="chatKeydown(event)" ${chatBusy?'disabled':''}></textarea>
       <button class="btn" onclick="sendChatMessage()" ${chatBusy?'disabled':''}>${chatBusy?"…":"Send"}</button>
     </div>
     <div class="row" style="margin-top:6px">
@@ -1695,6 +1695,7 @@ function chatPanelBodyHTML(){
     </div>`;
 }
 function renderChatWidget(){
+  if(DEMO_MODE) { document.getElementById("chatWidget").innerHTML=""; return; }
   const el = document.getElementById("chatWidget");
   if(!el) return;
   if(state.mode==="employee"){ el.innerHTML=""; return; } // manager-only, same as the old tab
@@ -1735,7 +1736,7 @@ function applySuggestedRequirement(){
 /* ---- small inline SVG line chart, no external library ---- */
 function lineChartSVG(series, xLabels, opts={}){
   const W=620,H=170,padL=36,padR=10,padT=10,padB=22;
-  const allVals = series.flatMap(s=>s.values).concat(opts.band?[opts.band[0],opts.band[1]]:[]);
+  const allVals = series.flatMap(s=>s.values).concat(opts.band?[opts.band[0],opts.band[1]]:[]).concat(Number.isFinite(opts.ref)?[opts.ref]:[]);
   const min = opts.min!==undefined?opts.min:Math.min(0,...allVals);
   const max = opts.max!==undefined?opts.max:Math.max(...allVals)*1.15;
   const n = xLabels.length;
@@ -1764,28 +1765,7 @@ function reqFTEFromCensus(dayC,nightC,ratio){
   return (Math.max(1,Math.ceil(dayC/ratio))*12*7 + Math.max(1,Math.ceil(nightC/ratio))*12*7)/36;
 }
 function laborCostForRange(dateSet){
-  let total = 0;
-  state.nurses.forEach(n=>{
-    const base = n.role==="Manager" ? state.budget.mgrWage : state.budget.rnWage;
-    const shifts = state.assignments.filter(a=>a.nurseId===n.id && dateSet.has(a.date))
-      .sort((a,b)=> a.date.localeCompare(b.date) || a.start-b.start);
-    let hoursSoFar = 0;
-    shifts.forEach(a=>{
-      const nightOrWeekend = (a.start>=19 || a.start<7) || isWeekend(a.date);
-      const holiday = isHoliday(a.date);
-      // stacks: both differentials add on top of base pay when both apply
-      let diffPct = 0;
-      if(nightOrWeekend) diffPct += state.budget.diffPct;
-      if(holiday) diffPct += state.budget.holidayDiffPct;
-      const rate = base * (1 + diffPct/100);
-      const regularLeft = Math.max(0, state.otThreshold - hoursSoFar);
-      const regHrs = Math.min(a.duration, regularLeft);
-      const otHrs = a.duration - regHrs;
-      total += regHrs*rate + otHrs*rate*1.5;
-      hoursSoFar += a.duration;
-    });
-  });
-  return total;
+  return EmPATHAnalytics.laborCost(state.assignments,state.nurses,dateSet,state.budget,state.otThreshold,state.holidays);
 }
 function laborCostThisWeek(){ return laborCostForRange(new Set(DAYS)); }
 function actualFTEForRange(dates){
@@ -1860,7 +1840,7 @@ function trendsTab(){
   return `
     <div class="panel no-print">
       <h2>Weekly or monthly view</h2>
-      <p class="desc">Both charts and the printable report below use this. Data comes from what you've actually recorded in Census &amp; FTE and actually scheduled, grouped into whichever bucket you pick, nothing here is simulated.</p>
+      <p class="desc">Charts and reports summarize the synthetic demonstration schedule and your temporary edits. They do not describe an actual unit.</p>
       <div class="row">
         <button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button>
         <button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button>
@@ -1868,9 +1848,9 @@ function trendsTab(){
     </div>
 
     <div class="panel">
-      <h2>FTE over time, vs a general-acuity reference band</h2>
+      <h2>Scheduled FTE and illustrative staffing scenarios</h2>
       ${weekNavControlHTML()}
-      <p class="desc">Straight answer on the national-benchmark question: there's no published number specific to the EmPATH model, it's too new and too operationally varied across hospitals for anyone to have built that dataset publicly. What's shown as the shaded band is the closest legitimate substitute: what your recorded census would require under general acute-psychiatric ratio law and proposals, 1:6 (California's mandated floor) at the low end and 1:4 (newer state proposals for psych emergency settings) at the high end. This is a reference range, not a true EmPATH average.</p>
+      <p class="desc">The shaded range uses illustrative ratios of one nurse per six or four occupants. These are scenario assumptions, not clinical staffing recommendations, legal requirements, or validated EmPATH benchmarks.</p>
       ${notEnoughData ? `<p class="empty">Only ${buckets.length} ${state.censusViewMode==='month'?'month':'week'}${buckets.length===1?'':'s'} of recorded census so far, not enough to show a real trend yet. Keep recording census in the Census &amp; FTE tab, this fills in over time.</p>` : lineChartSVG(
         [{name:"Actual FTE scheduled",color:"#8C6FC9",values:actualSeries}],
         labels, {band:[bandLow,bandHigh], ref:availFTE}
@@ -1878,14 +1858,14 @@ function trendsTab(){
       <div class="legend">
         <span><span class="swatch" style="background:#8C6FC9"></span> Actual FTE scheduled</span>
         <span>- - - Available FTE (current roster capacity: ${availFTE.toFixed(1)})</span>
-        <span><span class="swatch" style="background:#8C6FC9;opacity:.3"></span> Reference band, 1:6 to 1:4 general acute-psych ratios, from your recorded census</span>
+        <span><span class="swatch" style="background:#8C6FC9;opacity:.3"></span> Illustrative 1:6 to 1:4 scenario envelope</span>
       </div>
-      <p class="foot-note">If the actual-FTE line consistently sits below the reference band while roster capacity (the dashed line) is flat, that's a real, data-backed case that census has outgrown current staffing, not a hypothetical.</p>
+      <p class="foot-note">Use the scenarios to explore the calculation. Synthetic results cannot establish actual staffing needs.</p>
     </div>
 
     <div class="panel">
       <h2>Patient census over time</h2>
-      <p class="desc">No national comparison exists for this at all, unlike FTE there isn't even an adjacent legal benchmark to borrow, capacity and volume are entirely facility-specific. This is your own recorded trend only.</p>
+      <p class="desc">Synthetic census from the demonstration schedule; capacity is an illustrative 12 spaces.</p>
       ${notEnoughData ? `<p class="empty">Not enough recorded weeks yet to chart a trend.</p>` : lineChartSVG(
         [{name:"Day census",color:"#3C7A4E",values:censusDaySeries},{name:"Night census",color:"#B8892B",values:censusNightSeries}],
         labels, {max:12}
@@ -1899,7 +1879,7 @@ function trendsTab(){
 
     <div class="panel">
       <h2>Labor budget tracker</h2>
-      <p class="desc">Wage defaults below use the BLS national median RN wage, about $48/hr as of the May 2025 OEWS release, not a confirmed Pittsburgh-specific figure, regional wages vary and you should replace this with your actual rate. Holiday differential stacks on top of night/weekend differential and both apply before the 1.5x overtime multiplier on hours past ${state.otThreshold}/week. This is real hours × rate math now, not a placeholder formula.</p>
+      <p class="desc">Wages and differentials are illustrative assumptions. Hours are allocated to calendar days and overtime resets each Monday. This is a planning estimate, not payroll or legal guidance.</p>
       <div class="row">
         <button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button>
         <button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button>
@@ -1916,12 +1896,13 @@ function trendsTab(){
         <div class="stat"><div class="n">$${state.budget.weeklyTarget.toFixed ? state.budget.weeklyTarget.toFixed(0) : state.budget.weeklyTarget}</div><div class="l">Weekly budget target</div></div>
         <div class="stat ${laborVariance>0?'warn':'ok'}"><div class="n">${laborVariance>0?'+':''}$${laborVariance.toFixed(0)}</div><div class="l">Variance</div></div>
       </div>
-      ${notEnoughData ? `<p class="empty">Not enough recorded weeks yet to chart a labor cost trend.</p>` : lineChartSVG([{name:"Labor cost",color:"#B5502E",values:laborSeries}], labels, {ref:state.budget.weeklyTarget})}
+      ${notEnoughData ? `<p class="empty">Not enough recorded weeks yet to chart a labor cost trend.</p>` : lineChartSVG([{name:"Labor cost",color:"#B5502E",values:laborSeries}], labels)}
+      <p class="desc">${buckets.map(b=>`${b.label}: budget $${(state.budget.weeklyTarget*b.dates.length/7).toFixed(0)}`).join(" · ")}</p>
       <div class="legend">
         <span><span class="swatch" style="background:#B5502E"></span> Labor cost</span>
-        <span>- - - budget target</span>
+        <span>Compare each period with its prorated budget below.</span>
       </div>
-      <p class="foot-note">Every point here is computed directly from actual scheduled shifts in that ${state.censusViewMode==='month'?'month':'week'}, including stacked night/weekend and holiday differentials and 1.5x overtime past ${state.otThreshold} hours. It still doesn't include benefits load or agency/travel nurse rates, both of which would push a real hospital's true labor cost higher than this.</p>
+      <p class="foot-note">Every point here is computed from demonstration shifts in that ${state.censusViewMode==='month'?'month':'week'}, including stacked night/weekend and holiday differentials and 1.5x overtime past ${state.otThreshold} hours. It still doesn't include benefits load or agency/travel nurse rates, both of which would push a real hospital's true labor cost higher than this.</p>
     </div>
   `;
 }
@@ -2186,7 +2167,7 @@ function equityTab(){
     <div class="panel">
       <h2>Equity score, rolling YTD</h2>
       ${flashMessage ? `<div class="flag warn block">${flashMessage}</div>` : ""}
-      <p class="desc">Every number below is directly editable, use that now to enter real backdated totals since this tool has no history of its own yet. Going forward, use "Sync this week into YTD" below instead of hand-editing, it adds actual worked nights/weekends/holidays from whichever week you're viewing in Coverage, once, so you don't have to keep re-typing running totals yourself. PTO and preference columns already update automatically when you approve or deny a request in the Requests tab, editing them here just corrects them if needed.</p>
+      <p class="desc">Every number below is directly editable, use synthetic values only to explore the scoring. Going forward, use "Sync this week into YTD" below instead of hand-editing, it adds actual worked nights/weekends/holidays from whichever week you're viewing in Coverage, once, so you don't have to keep re-typing running totals yourself. PTO and preference columns already update automatically when you approve or deny a request in the Requests tab, editing them here just corrects them if needed.</p>
       <div class="row" style="margin-bottom:14px">
         <button class="btn secondary" onclick="syncEquityFromWeek()">Sync this week (${weekLabel()}) into YTD</button>
       </div>
@@ -2344,7 +2325,7 @@ function printCensusHistoryHTML(){
       </tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
-    <p style="font-size:10px;color:#666;margin-top:10px">Every number above comes from recorded census entries and actual scheduled shifts, nothing simulated. * = FTE imported directly from a spreadsheet rather than computed from schedule data (used for backdated weeks with no assignment history).</p>
+    <p style="font-size:10px;color:#666;margin-top:10px">Every number above is from the synthetic demonstration or temporary edits; no hospital results are represented. * = FTE imported directly from a spreadsheet rather than computed from schedule data (used for backdated weeks with no assignment history).</p>
   `;
 }
 function printTab(){
@@ -2387,7 +2368,16 @@ function printTab(){
     <div class="panel" id="printArea">
       ${body}
     </div>
-    <style>@page { size: ${state.printOpts.orientation}; margin: 1.5cm; }</style>
+    <style>@page { size: ${state.printOpts.orientation}; margin: 1.5cm; }
+  .demo-notice { padding:14px 24px; background:#f1edf8; color:#352853; font-size:13px; line-height:1.6; border-bottom:1px solid var(--border); }
+  .ops-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(205px,1fr)); gap:16px; margin:18px 0; }
+  .ops-grid .stat { text-align:left; padding:16px; border:1px solid var(--border); border-radius:8px; }
+  .ops-grid .desc { font-size:12px; margin:8px 0 0; }
+  .ops-definitions { padding-left:20px; line-height:1.8; }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid #6352a0; outline-offset:3px; }
+  @media(max-width:600px) { header { flex-wrap:wrap; padding:18px; } header h1 { font-size:21px; } main { padding:14px; } .demo-notice { padding:12px 18px; } .ops-grid { grid-template-columns:1fr; } }
+@media print { body::before { content:"SYNTHETIC DEMONSTRATION — NOT HOSPITAL DATA"; display:block; font-weight:bold; padding:12px; border:2px solid #333; } }
+</style>
   `;
 }
 
@@ -2692,8 +2682,6 @@ function employeePortal(){
     ${scorePanel}`;
 }
 
-render();
-initPersistence();
 document.addEventListener("keydown", e=>{
   if(e.key!=="Escape") return;
   if(selDate!==null){
@@ -2705,6 +2693,18 @@ document.addEventListener("keydown", e=>{
   const asf = document.getElementById("addShiftForm");
   if(asf && asf.innerHTML.trim()) asf.innerHTML="";
 });
+</script>
+<script src="operations.js"></script>
+<script>
+// Seed eight complete weeks and the current schedule from formulas, not imported data.
+for(let day=-56; day<7; day++){
+  const date=addDays(WEEK_START,day), idx=day+56;
+  state.census[date]={day:7+idx%5,night:4+idx%4};
+  [0,1,2,3].forEach((slot)=>state.assignments.push({id:'demo-'+idx+'-'+slot,nurseId:'demo'+((idx*4+slot)%10+1),date,start:slot<2?7:19,duration:12}));
+  [0,1].forEach(slot=>state.assignments.push({id:'demo-a-'+idx+'-'+slot,nurseId:'demo'+(11+(idx*2+slot)%4),date,start:slot?19:7,duration:12}));
+}
+render();
+initPersistence();
 </script>
 </body>
 </html>

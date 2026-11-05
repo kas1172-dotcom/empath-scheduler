@@ -1,162 +1,68 @@
-# EMPATH Unit Scheduler
+# EMPATH Unit Clinical Staffing & Operations Platform
 
-A single-file, self-contained nurse scheduler for a 12-capacity EMPATH-model crisis
-stabilization unit attached to an ED. Built to do two things: make weekly scheduling
-less painful, and give the manager enough real data over time to argue for the FTE
-the unit actually needs.
+An interactive portfolio demonstration of nurse scheduling, scheduling equity, and unit-level operational analytics. Built by Kapil Sharma from firsthand healthcare operational experience.
 
-## Running it
+[Open the demonstration](https://kas1172-dotcom.github.io/empath-scheduler/)
 
-Open `index.html` in a browser. No build step, no install, no dependencies to fetch
-up front (the spreadsheet library loads on its own, lazily, only if you use Import or
-Export). Works from disk, from GitHub Pages, or published as a Claude artifact.
+## Data and intended use
 
-## Persistence — read this before relying on it
+The public demonstration uses **fictional staff labels and synthetic unit totals generated from formulas**. It contains no patient records, diagnoses, medical record numbers, clinical notes, or real staff roster. The figures are not hospital results or evidence of actual staffing outcomes.
 
-Three tiers, picked automatically at load, in this order:
+Use synthetic inputs only. The demo runs in browser memory: edits reset when the page reloads. It does not read old browser storage, contact a shared state service, or send data to an AI provider. The employee view is a demonstration of a workflow, not an authenticated account.
 
-- **Deployed to its own backend (Fly.io, see below)**: real server-side persistence in
-  a file on a Fly Volume, independent of any one browser, synced across every device
-  that opens the URL (polls for changes every 5s). This is the tier you want for actual
-  multi-device, multi-person use. Still no transactions: two saves in the same instant,
-  the second wins entirely, not just the fields that collided — fine for a manager plus
-  a handful of staff, not fine at real scale.
-- **Inside Claude's own viewer**, this saves to a real shared document (the `db`
-  capability) and syncs live between everyone who has it open. Same no-transactions
-  caveat as above.
-- **Anywhere else** (GitHub Pages, opened straight from disk, with no backend
-  reachable), it falls back to this browser's own `localStorage`. Your data survives a
-  refresh and follows you between tabs of the *same* browser, but does not sync to
-  anyone else and does not follow you to a different device.
+## What to explore
 
-A status indicator next to Undo always says which of these is active and whether it's
-Saved, Saving…, or erroring. It never fails silently.
-- **There is no real sign-in yet.** The "Employee portal" is a dropdown that lets
-  anyone preview any nurse's view from the same browser tab. It is not access control.
-  Anyone who can open the page can open the Manager view, the Roster, wages, everyone's
-  equity scores. Do not rely on this for anything you wouldn't want a nurse to see
-  just by clicking a dropdown.
+- **Operations:** average completed-stay length, occupancy, nursing hours per patient day (NHPPD), discharges, aggregate financial averages, illustrative acuity workload, hourly census, and a weekly summary.
+- **Staffing scenarios:** change additional FTE and hourly cost to estimate hours, cost, and NHPPD. The model does not predict clinical outcomes or financial return.
+- **Coverage:** edit hourly coverage, explore automatic gap filling, and distinguish nursing coverage from aide coverage.
+- **Census and budget:** inspect synthetic historical trends and scheduling-based labor estimates.
+- **Roster, requests, equity, and call-offs:** explore manager and employee workflows with fictional staff.
+- **Export:** download clearly labeled synthetic unit totals as CSV; existing scheduling reports remain available.
 
-## What's actually in it
+Operations uses an independent 56-day illustrative aggregate dataset. Schedule edits do not change its historical totals. The dashboard explicitly labels this distinction. Both 7-day and 28-day windows compare against the preceding equal-length period.
 
-**Scheduling**
-- Editable hourly coverage grid, tap/click to assign, tap a second hour in the same
-  day to select a range, visible breaks where one shift ends and the next begins
-- A separate, always-on coverage floor for psychiatric aides, tracked apart from the
-  RN/Manager ratio requirement, since an aide doesn't satisfy that ratio
-- Auto-fill for RN/Manager gaps only (aides self-schedule, this never touches them):
-  rule-based, not an optimizer, ranks by shift-time preference, manager-on-days
-  priority, fewest hours this week, then lowest equity score
-- Roles: RN, MHRN, Manager, Aide, Other (agency/fill-in)
-- FLSA overtime (40 hr/week) and holiday pay, differentials stack, both configurable
-- Undo for every data change, with a visible count
+## Metric definitions
 
-**Staff-facing**
-- Employee portal with a real monthly calendar: past shifts shown as history, future
-  days for requesting PTO / Off / a desired shift (single day or a tapped range),
-  patient census submission for days actually worked
-- A review queue on the manager side for both requests and submitted census, with
-  edit-before-approve and conflict flags
-- Equity/fairness scoring (nights, weekends, holidays, PTO, desired shifts), editable
-  directly for backdating, or synced from a week's actual worked shifts going forward
-- Aides are intentionally excluded from equity scoring; they pick their own hours
+| Metric | Calculation |
+| --- | --- |
+| Average length of stay | Sum of completed-stay hours / discharges |
+| Occupancy | Patient-hours / (12 spaces × 24 hours × days) |
+| NHPPD | Productive nursing hours / (patient-hours / 24); excludes aides |
+| Revenue or cost per discharge | Illustrative unit total / discharges |
+| Higher-acuity share | Illustrative higher-acuity patient-hours / total patient-hours |
+| Additional staffing hours | Additional FTE × 36 productive weekly hours × days / 7 |
 
-**Data in and out**
-- Import census/FTE from a spreadsheet (`.xlsx`/`.csv`), loosely-matched columns
-- Import past shifts from a spreadsheet, matched against your Roster by name, safe to
-  re-run (skips exact duplicates, reports what it skipped and why)
-- Import past shifts from a **photo** of a schedule (printed or handwritten) — needs
-  the Fly.io backend deployed with an `ANTHROPIC_API_KEY` secret set (see below), since
-  reading a photo takes a vision-model call a static page can't make on its own. Shows
-  you a preview of everything it read, matched and ready to confirm, before anything
-  touches the schedule.
-- Export the current week's shifts to `.xlsx`
-- Print: grid, daily list, or a census/FTE history report, portrait or landscape
+Ratios use summed numerators and denominators. Empty denominators display unavailable values. The higher-acuity category is an illustrative workload assumption, not a clinical instrument. The staffing bands and wage defaults are scenario assumptions, not legal standards or clinical recommendations.
 
-**Assistant**
-- A chat tab where a manager can ask questions ("who's working Saturday night") or describe
-  a change in plain English ("give Dawn Friday off", "Edward needs Oct 10–24 off") — also
-  needs the Fly.io backend and `ANTHROPIC_API_KEY` (see below), it's a server-side model call
-  like photo import. It can add/remove shifts, mark someone off for a date range, update FTE,
-  or correct a census number. It never changes anything on its own: every proposed change is
-  shown for review first, with Apply/Discard, exactly like photo import's preview step, and
-  anything applied goes through the same Undo history as a manual edit.
+## Run locally
 
-**Making the FTE case**
-- Census & FTE tracks your own ratio target against actual staffing, retrospectively
-  (this unit's census is ED-driven and can't be forecast, so it's not used to set a
-  forward staffing target, only to check past staffing against what actually happened)
-- Trends & Budget aggregates real recorded data week-over-week or month-over-month,
-  no simulated placeholder numbers, it's blank until you've actually recorded more
-  than one period
-- Labor cost tracking with real wage/differential/overtime math
-
-## Deploying your own copy to Fly.io
-
-This runs the same `index.html` behind a small Node/Express server (`server.js`) that
-persists state to a file on a Fly Volume, so it's no longer tied to one browser or one
-device. Total cost at the settings below is under $4/month — a `shared-cpu-1x` machine
-at 512MB RAM (~$3.69/mo) plus a 1GB Volume (~$0.15/mo). No managed database needed.
-
-**One-time setup**, from a terminal with [`flyctl`](https://fly.io/docs/flyctl/install/)
-installed and `fly auth login` already run:
+Requires Node.js 20 or newer for the optional local server and tests.
 
 ```sh
-cd empath-scheduler
-fly launch --no-deploy   # picks a unique app name if "empath-scheduler" is taken;
-                          # when it asks, say no to Postgres/Redis — the app doesn't need them
-fly volumes create empath_data --region iad --size 1   # 1GB volume for the SQLite-free JSON store
-fly deploy
+npm ci
+npm test
+npm start
+# Open http://localhost:8080
 ```
 
-`fly launch` will offer to create/overwrite `fly.toml` — the one already in this repo
-already has the right machine size (`shared-cpu-1x`, 512MB), the volume mount, and
-`auto_stop_machines` turned on so you're billed only while it's actually serving a
-request. If `fly launch` regenerates it differently, just restore the settings above
-before running `fly deploy`.
+Alternatively, serve this directory with any static HTTP server. No build step is required. Keep `index.html`, `analytics.js`, and `operations.js` together. Spreadsheet import/export loads its existing spreadsheet dependency on demand; operational analytics has no external library dependency.
 
-**To turn on photo-based schedule import** (optional): get your own API key from
-[console.anthropic.com](https://console.anthropic.com), then:
+## Architecture
 
-```sh
-fly secrets set ANTHROPIC_API_KEY=sk-ant-...
-```
+- `index.html`: scheduling UI, employee workflow, and ephemeral demonstration state.
+- `analytics.js`: dependency-free metric, scenario, and labor-cost calculations; shared with Node tests.
+- `operations.js`: aggregate dashboard, period selection, scenario controls, and synthetic CSV export.
+- `server.js`: optional Express host. Only public application assets are served.
+- `tests/analytics.test.js`: weighted metrics, empty denominators, deterministic data, workweek boundaries, partial reports, overnight shifts, and staffing scenarios.
 
-That's it — no redeploy needed, Fly restarts the machine with the new secret
-automatically. Until you set this, the photo-import panel stays visibly disabled with
-an explanation, and every other feature works normally without it.
+Labor estimates split shifts at calendar boundaries and reset overtime on Mondays. They count preceding hours in the same week for partial reporting ranges and use a separate aide wage. These calculations are planning estimates; payroll agreements, regular-rate rules, benefits, and local requirements need independent implementation and review.
 
-**After deploying**, open the app at `https://<your-app-name>.fly.dev` instead of the
-GitHub Pages copy or the Claude artifact — that's the one with real, synced, multi-
-device persistence. The GitHub Pages copy and the Claude artifact keep working exactly
-as before (falling back to localStorage / the `db` capability respectively); nothing
-about deploying this changes them.
+## Private backend status
 
-**First-time setup on a fresh deploy** — the app ships with no staff, no shifts, and no
-census data, by design, so there's nothing demo-ish to clear out before real use:
-1. **Roster tab**: add every nurse, manager, and aide (role, FTE, cert status, preferred
-   shift start). This is the one thing that has to be done by hand first, everything
-   else matches people up against it by name.
-2. **Census & FTE tab**: bring in real history for the ratio/FTE tracking to mean
-   anything, either the spreadsheet import, the photo import (once the API key's set),
-   or typing it in directly.
-3. Going forward, build each week in the Coverage tab (manually or with Auto-fill), and
-   have staff submit their own census from the Employee portal, or keep entering it
-   yourself.
+Legacy shared-state and AI routes remain in the server for further private development, but **are disabled by default**. They require both `ENABLE_PRIVATE_API=true` and an `APP_ACCESS_TOKEN`, and requests must supply that token as a bearer credential. The public UI never uses those routes. Do not embed a token in static source.
 
-## Known gaps, in priority order
+This gate is not a complete hospital deployment: user accounts, role-based access, audit logging, transactional storage, backup/recovery, and an approved data-governance process are not implemented. Do not use this public demonstration as a clinical system. No paid service or AI key is needed for the demo.
 
-1. **No real accounts or access control.** Anyone with the link sees everything.
-2. **Persistence has no transactions** on any path (server, Claude-hosted, or
-   localStorage) — two saves in the same instant, the second wins entirely, not just
-   the fields that collided.
-3. **No daily/weekly automated backup export** — if the Fly Volume (or the Claude `db`
-   document, or the browser's localStorage) is ever lost, so is the history.
-4. **Photo import's accuracy depends on the photo.** A vision model can misread a name
-   or a time, which is why it always shows a preview to confirm before anything is
-   added to the schedule — but it's still only as good as what it was asked to read.
+## Deployment
 
-The natural next step, once this is used enough that these matter, is real sign-in and
-row-level access rules on top of the Fly.io backend — that removes the account-boundary
-problem and the transaction problem in one move, but it's a genuine extension of the
-server, not a small patch.
+The GitHub Pages workflow publishes only the three application assets after the calculation tests pass. It does not publish backend source, configuration, or stored state. The repository slug is retained for stable links; the application name above matches the resume.
