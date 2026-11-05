@@ -40,3 +40,8 @@ test('staffing scenarios change hours and costs without inventing outcomes',()=>
  assert.equal(out.addedHours,288);assert.equal(out.addedCost,17280);assert.ok(out.nhppd>s.nhppd);
  assert.throws(()=>A.staffingScenario(s,-1,36,60),RangeError);
 });
+
+test('partial periods use observed days and retain recorded zero census',()=>{
+ const buckets=A.censusPeriods({'2026-10-01':{day:0,night:0},'2026-10-02':{day:10,night:6},'2026-10-03':{day:null,night:2}},'month');
+ assert.equal(buckets.length,1);assert.deepEqual(buckets[0].dates,['2026-10-01','2026-10-02']);assert.equal(buckets[0].avgDay,5);assert.equal(buckets[0].avgNight,3);
+});

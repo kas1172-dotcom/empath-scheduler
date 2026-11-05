@@ -24,6 +24,20 @@
       highAcuityShare: safeDivide(sum('highAcuityHours'), patientHours),
       hourly, peakHour: rows.length ? hourly.indexOf(Math.max(...hourly)) : null };
   }
+  function censusPeriods(census, mode = 'week') {
+    const groups = new Map();
+    for (const [date, value] of Object.entries(census)) {
+      if (!value || !Number.isFinite(value.day) || !Number.isFinite(value.night) || value.day < 0 || value.night < 0) continue;
+      const key = mode === 'month' ? date.slice(0, 7) : weekStart(date);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({date, ...value});
+    }
+    return [...groups].sort(([a],[b])=>a.localeCompare(b)).map(([key,rows])=>({
+      key, dates: rows.map(r=>r.date).sort(),
+      avgDay: rows.reduce((n,r)=>n+r.day,0)/rows.length,
+      avgNight: rows.reduce((n,r)=>n+r.night,0)/rows.length
+    }));
+  }
   function makeDemoRows(endDate, days = 56) {
     return Array.from({length: days}, (_, i) => {
       const date = addDays(endDate, i - days + 1);
@@ -70,5 +84,5 @@
     }
     return total;
   }
-  return {addDays, weekStart, summarize, makeDemoRows, staffingScenario, laborCost};
+  return {addDays, weekStart, summarize, makeDemoRows, staffingScenario, laborCost, censusPeriods};
 });

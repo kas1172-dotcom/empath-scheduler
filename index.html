@@ -1782,42 +1782,15 @@ function avgManualFTE(dates){
   const vals = dates.map(d=>state.manualFTE[d]).filter(v=>v!=null && !isNaN(v));
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
 }
-function censusByWeek(){
-  const weekMap = {};
-  Object.keys(state.census).forEach(dateISO=>{
-    const c = state.census[dateISO];
-    if(!c || (c.day===0 && c.night===0)) return;
-    const dow = (new Date(dateISO+"T00:00:00").getDay()+6)%7;
-    const wkStart = addDays(dateISO, -dow);
-    if(!weekMap[wkStart]) weekMap[wkStart] = {dayTotal:0,nightTotal:0,n:0};
-    weekMap[wkStart].dayTotal += c.day; weekMap[wkStart].nightTotal += c.night; weekMap[wkStart].n++;
-  });
-  return Object.keys(weekMap).sort().map(wk=>{
-    const w = weekMap[wk];
-    const wkDates = weekDays(wk);
-    const manual = avgManualFTE(wkDates);
-    return { label: wk.slice(5), avgDay: w.dayTotal/w.n, avgNight: w.nightTotal/w.n, actualFTE: manual!=null?manual:actualFTEForRange(wkDates), fromImport: manual!=null, dates: wkDates };
+function censusBuckets(mode){
+  return EmPATHAnalytics.censusPeriods(state.census,mode).map(b=>{
+    const manual=avgManualFTE(b.dates);
+    const label=mode==='month'?new Date(b.key+'-01T00:00:00').toLocaleString('en-US',{month:'short',year:'2-digit'}):b.key.slice(5);
+    return {...b,label,actualFTE:manual!=null?manual:actualFTEForRange(b.dates),fromImport:manual!=null};
   });
 }
-function censusByMonth(){
-  const monthMap = {};
-  Object.keys(state.census).forEach(dateISO=>{
-    const c = state.census[dateISO];
-    if(!c || (c.day===0 && c.night===0)) return;
-    const ym = dateISO.slice(0,7);
-    if(!monthMap[ym]) monthMap[ym] = {dayTotal:0,nightTotal:0,n:0};
-    monthMap[ym].dayTotal += c.day; monthMap[ym].nightTotal += c.night; monthMap[ym].n++;
-  });
-  return Object.keys(monthMap).sort().map(ym=>{
-    const m = monthMap[ym];
-    const [y,mo] = ym.split("-").map(Number);
-    const daysInMonth = new Date(y,mo,0).getDate();
-    const monthDates = Array.from({length:daysInMonth},(_,i)=>`${ym}-${String(i+1).padStart(2,'0')}`);
-    const label = new Date(ym+"-01T00:00:00").toLocaleString('en-US',{month:'short',year:'2-digit'});
-    const manual = avgManualFTE(monthDates);
-    return { label, avgDay: m.dayTotal/m.n, avgNight: m.nightTotal/m.n, actualFTE: manual!=null?manual:actualFTEForRange(monthDates), fromImport: manual!=null, dates: monthDates };
-  });
-}
+function censusByWeek(){ return censusBuckets('week'); }
+function censusByMonth(){ return censusBuckets('month'); }
 function setCensusViewMode(v){ state.censusViewMode=v; render(); }
 
 /* ---- Trends & Budget tab ---- */
@@ -1840,7 +1813,7 @@ function trendsTab(){
   return `
     <div class="panel no-print">
       <h2>Weekly or monthly view</h2>
-      <p class="desc">Charts and reports summarize the synthetic demonstration schedule and your temporary edits. They do not describe an actual unit.</p>
+      <p class="desc">Charts and reports summarize the synthetic demonstration schedule and your temporary edits. Only days with recorded day and night census are included; a recorded zero counts, a missing day does not. Partial-period budgets use the same included dates. They do not describe an actual unit.</p>
       <div class="row">
         <button class="btn ${state.censusViewMode!=='month'?'':'secondary'}" onclick="setCensusViewMode('week')">Week over week</button>
         <button class="btn ${state.censusViewMode==='month'?'':'secondary'}" onclick="setCensusViewMode('month')">Month over month</button>
